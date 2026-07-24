@@ -841,7 +841,8 @@ planner_error_t plan(struct deco_state *ds, struct diveplan &diveplan, struct di
 	do {
 		if (decostoptable)
 			decostoptable->clear();
-		is_final_plan = (pref_deco_mode(true) == BUEHLMANN) || (previous_deco_time - ds->deco_time < 10);  // CVA time converges
+		/* CVA iteration is a VPM-B mechanism; Buehlmann and Thalmann converge in one pass */
+		is_final_plan = (pref_deco_mode(true) != VPMB) || (previous_deco_time - ds->deco_time < 10);  // CVA time converges
 		if (ds->deco_time != 10000000)
 			vpmb_next_gradient(ds, ds->deco_time, diveplan.surface_pressure.mbar / 1000.0, true);
 

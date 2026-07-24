@@ -23,6 +23,7 @@
 #include "qthelper.h"
 #include "format.h"
 #include "subsurface-string.h"
+#include "thalmann.h"
 #include "version.h"
 
 int diveplan::duration() const
@@ -89,8 +90,10 @@ const char *get_planner_disclaimer()
 /* Returns newly allocated buffer. Must be freed by caller */
 extern std::string get_planner_disclaimer_formatted()
 {
-	const char *deco = pref_deco_mode(true) == VPMB ? translate("gettextFromC", "VPM-B")
-							: translate("gettextFromC", "BUHLMANN");
+	// AI-generated (Claude)
+	const char *deco = pref_deco_mode(true) == VPMB     ? translate("gettextFromC", "VPM-B")
+			 : pref_deco_mode(true) == THALMANN ? translate("gettextFromC", "THALMANN")
+							    : translate("gettextFromC", "BUHLMANN");
 	return format_string_std(get_planner_disclaimer(), deco);
 }
 
@@ -453,6 +456,10 @@ void diveplan::add_plan_to_notes(struct dive &dive, bool show_disclaimer, planne
 	} else if (pref_deco_mode(true) == RECREATIONAL) {
 		buf += casprintf_loc(translate("gettextFromC", "Deco model: Recreational mode based on Bühlmann ZHL-16B with GFLow = %d%% and GFHigh = %d%%"),
 			     gflow, gfhigh);
+	} else if (pref_deco_mode(true) == THALMANN) {
+		// AI-generated (Claude)
+		buf += casprintf_loc(translate("gettextFromC", "Deco model: Thalmann EL-DCM (U.S. Navy), parameter set %s"),
+			     thalmann_paramset_names[prefs.planner_thalmann_paramset >= 0 && prefs.planner_thalmann_paramset < thalmann_paramset_count ? prefs.planner_thalmann_paramset : 0]);
 	}
 	buf += "<br/>\n";
 

@@ -42,6 +42,12 @@ struct deco_state {
 	long sumx = 0, sumxx = 0;
 	double sumy = 0, sumxy = 0;
 	int plot_depth = 0;
+
+	// AI-generated (Claude)
+	// Thalmann EL-DCM state (deco mode THALMANN) - single lumped inert
+	// gas tension per compartment, in fsw; see core/thalmann.cpp.
+	double thalmann_tension_fsw[16] = {};
+	double thalmann_surface_bar = 1.01325;
 };
 
 extern const double buehlmann_N2_t_halflife[];

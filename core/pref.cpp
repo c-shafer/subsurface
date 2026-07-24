@@ -67,6 +67,7 @@ preferences::preferences() :
 	min_switch_duration(60),
 	surface_segment(0),
 	planner_deco_mode(BUEHLMANN),
+	planner_thalmann_paramset(0),
 	problemsolvingtime(4),
 	reserve_gas(40000),
 	sacfactor(400),
