@@ -70,6 +70,8 @@ set(SUBSURFACE_CORE_LIB_SRCS
 	datatrak.h
 	deco.cpp
 	deco.h
+	lemscore.cpp
+	lemscore.h
 	device.cpp
 	device.h
 	devicedetails.cpp
@@ -272,6 +274,8 @@ set(SUBSURFACE_CORE_LIB_SRCS
 source_group("Subsurface Core" FILES ${SUBSURFACE_CORE_LIB_SRCS})
 
 add_library(subsurface_corelib STATIC ${SUBSURFACE_CORE_LIB_SRCS})
-# Vendored Thalmann EL-DCM headers (deco/... and params/...) used by thalmann.cpp
-target_include_directories(subsurface_corelib PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/deco-thalmann)
+# Vendored Thalmann EL-DCM / LEM headers (deco/... and params/...) used by
+# thalmann.cpp and lemscore.cpp; PUBLIC so tests can score reference profiles
+# against the same engine.
+target_include_directories(subsurface_corelib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/deco-thalmann)
 target_link_libraries(subsurface_corelib ${QT_LIBRARIES})

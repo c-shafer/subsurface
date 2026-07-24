@@ -22,6 +22,7 @@
 #include "pref.h"
 #include "qthelper.h"
 #include "format.h"
+#include "lemscore.h"
 #include "subsurface-string.h"
 #include "thalmann.h"
 #include "version.h"
@@ -441,6 +442,12 @@ void diveplan::add_plan_to_notes(struct dive &dive, bool show_disclaimer, planne
 	divelog.dives.update_cylinder_related_info(dive);
 	buf += casprintf_loc("<div>\n%s: %i%%", translate("gettextFromC", "CNS"), dive.cns);
 	buf += casprintf_loc("<br/>\n%s: %i<br/>\n</div>\n", translate("gettextFromC", "OTU"), dive.otu);
+
+	// AI-generated (Claude)
+	lem_pdcs_result pdcs = calculate_lem_pdcs(dive, 0);
+	if (pdcs.valid)
+		buf += casprintf_loc(translate("gettextFromC", "<div>\npDCS (U.S. Navy LEM): %.2f%% (he8n25), %.2f%% (HeN2_2016)<br/>\n</div>\n"),
+			pdcs.pdcs_he8n25 * 100.0, pdcs.pdcs_hen2_2016 * 100.0);
 
 	/* Print the settings for the diveplan next. */
 	buf += "<div>\n";
