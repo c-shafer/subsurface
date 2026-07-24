@@ -361,6 +361,37 @@
         </widget>
        </item>
 
+       <item row="3" column="5">
+        <widget class="QGroupBox" name="groupBox_pdcs">
+         <property name="title">
+          <string>pDCS (USN LEM)</string>
+         </property>
+         <property name="toolTip">
+          <string>Probability of decompression sickness under the U.S. Navy probabilistic LEM model (NEDU TR 02-10), scored with the LEM-he8n25 and LEM-HeN2_2016 calibrations. Dissolved-gas hazard core; each dive scored in isolation including 24h post-dive surface interval.</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignHCenter</set>
+         </property>
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+           <horstretch>1</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <layout class="QHBoxLayout" name="diveInfoPdcsLayout">
+          <item>
+           <widget class="QLabel" name="pdcsText">
+            <property name="text">
+             <string/>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
        <item row="4" column="0">
         <widget class="QLabel" name="environmentHeadingLabel">
          <property name="text">

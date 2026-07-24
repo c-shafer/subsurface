@@ -15,6 +15,7 @@
 #include "core/statistics.h"
 #include "core/string-format.h"
 #include "core/divelist.h"
+#include "core/lemscore.h"
 
 #include <QSignalBlocker>
 
@@ -76,6 +77,7 @@ void TabDiveInformation::clear()
 	ui->sacText->clear();
 	ui->otuText->clear();
 	ui->maxcnsText->clear();
+	ui->pdcsText->clear();
 	ui->oxygenHeliumText->clear();
 	ui->gasUsedText->clear();
 	ui->diveTimeText->clear();
@@ -124,6 +126,14 @@ void TabDiveInformation::updateProfile()
 	dive *currentDive = parent.currentDive;
 	ui->maxcnsText->setText(QString("%L1\%").arg(currentDive->maxcns));
 	ui->otuText->setText(QString("%L1").arg(currentDive->otu));
+	// AI-generated (Claude)
+	lem_pdcs_result pdcs = calculate_lem_pdcs(*currentDive, parent.currentDC);
+	if (pdcs.valid)
+		ui->pdcsText->setText(QString("he8n25: %1%\nHeN2_2016: %2%")
+			.arg(pdcs.pdcs_he8n25 * 100.0, 0, 'f', 2)
+			.arg(pdcs.pdcs_hen2_2016 * 100.0, 0, 'f', 2));
+	else
+		ui->pdcsText->clear();
 	ui->maximumDepthText->setText(get_depth_string(currentDive->maxdepth, true));
 	ui->averageDepthText->setText(get_depth_string(currentDive->meandepth, true));
 
