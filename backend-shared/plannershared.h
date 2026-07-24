@@ -18,6 +18,7 @@ class PlannerShared: public QObject {
 public:
 	// Planning data
 	static deco_mode planner_deco_mode();
+	static int planner_thalmann_paramset();
 	static int reserve_gas();
 	static bool dobailout();
 	static bool doo2breaks();
@@ -37,6 +38,7 @@ public slots:
 
 	// Planning data
 	static void set_planner_deco_mode(deco_mode value);
+	static void set_planner_thalmann_paramset(int value);
 	static void set_reserve_gas(int value);
 	static void set_dobailout(bool value);
 	static void set_doo2breaks(bool value);
