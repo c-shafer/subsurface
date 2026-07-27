@@ -230,4 +230,45 @@ void TestLemPlanner::testNonMonotonicRiskTerminates()
 	QVERIFY(totalStopSeconds(stoptable) < 48 * 3600);
 }
 
+/* A large exposure, where the stop time has to be spread across depths.
+ *
+ * This is the case that caught the original local ascent criterion: it left
+ * every deep stop almost at once, parked at 20 ft where P_DCS saturates, and
+ * surfaced at 4.63% against a 2.30% target after 353 min of stops - while
+ * libdeco's own global greedy meets the target in 262 min. A schedule that
+ * misses the target here while spending MORE time than the reference means
+ * the allocation has gone local again.
+ *
+ * Reference: libdeco lem_generate_schedule() on the same dive, target 2.30%:
+ *   80/1 70/2 60/3 50/4 40/3 30/69 20/180, total 262 min, P_DCS 2.2986%. */
+void TestLemPlanner::testLargeExposureAllocatesDeepStops()
+{
+	std::vector<decostop> stoptable;
+
+	setupLemPrefs(0, 230);		// 2.30%
+	planner_error_t error = planSquareCcrDive(170, 100, stoptable);
+
+	int deep = 0;	// stop time deeper than the last two stops
+	for (auto &stop: stoptable)
+		if (stop.depth > feet_to_mm(20))
+			deep += stop.time;
+
+#if DEBUG
+	dumpStops("170 ft / 100 min CCR, target 2.30%", stoptable);
+	printf("  deep (>20 ft) stop time %d s\n", deep);
+	printf("  achieved pDCS %.4f%% (target %.4f%%)\n",
+	       achievedPdcs(0) * 100.0, lem_target_pdcs() * 100.0);
+#endif
+
+	QCOMPARE(error, PLAN_OK);
+	QVERIFY(achievedPdcs(0) <= lem_target_pdcs());
+	/* The reference puts 82 of its 262 min above the last stop. A schedule
+	 * that reaches the target with essentially nothing deep would mean the
+	 * allocation collapsed to the last stop again. */
+	QVERIFY(deep >= 20 * 60);
+	/* And it must not pay for the target with a wildly longer schedule
+	 * than the reference needs. */
+	QVERIFY(totalStopSeconds(stoptable) < 2 * 262 * 60);
+}
+
 QTEST_GUILESS_MAIN(TestLemPlanner)

@@ -14,47 +14,52 @@
  * "shallowest permissible depth right now" to report, so LEM cannot be
  * plugged in at tissue_tolerance_calc() the way the other three are.
  *
- * What LEM does answer is: "if I go up from here, what is my P_DCS?" That is
- * enough to drive the planner's existing stop walker, because the walker only
- * ever asks one question - trial_ascent(): may I leave this depth yet? So
- * this backend supplies a probabilistic trial_ascent() instead of a ceiling,
- * and every other part of the planner (stop grid, gas switches, backgas
- * breaks, gas consumption, the deco stop table, plan notes) is reused
- * unchanged.
+ * What LEM does answer is: "if I ascend on this schedule, what is my P_DCS?"
+ * So the schedule is chosen up front by searching over whole candidate
+ * ascents, and handed to the planner's own stop walker as a table of stop
+ * times, through the one question the walker ever asks - trial_ascent(): may
+ * I leave this depth yet? Every other part of the planner (stop grid, gas
+ * switches, backgas breaks, gas consumption, the deco stop table, plan notes)
+ * is reused unchanged.
  *
- * THE CRITERION
+ * THE ALLOCATION
  *
- * The diver is clear to ascend when either
+ * Stop times are decided ALL AT ONCE, before the ascent is walked, by the
+ * same global greedy libdeco's own lem_generate_schedule() uses: start from a
+ * direct ascent and repeatedly add a block of time to whichever candidate
+ * stop depth it most reduces P_DCS at, until the target is met. The walker
+ * then just serves the times it was handed - lem_trial_ascent() below is a
+ * bookkeeping check, not a model evaluation.
  *
- *   (a) surfacing from here already meets the target risk, or
- *   (b) the next minute of decompression is worth more at the next stop
- *       level than it is here.
+ * It has to be global. The obvious local alternatives both fail, and it is
+ * worth recording how, because both look reasonable:
  *
- * (a) is the planning goal: prefs.planner_lem_target_pdcs, the P_DCS the
- * schedule is built to.
+ * - "Ascend when surfacing from here meets the target" pays the entire
+ *   obligation off at the first stop deep enough to have one, producing
+ *   schedules several times longer than needed.
+ * - "Ascend when the next minute is worth more one stop shallower" fixes
+ *   that and breaks something worse. It is myopic and one-way: it compares
+ *   marginal rates at the instant of arrival, and on a big exposure the
+ *   shallower minute always wins that comparison, so the walker leaves every
+ *   deep stop almost immediately, parks at the last stop - where P_DCS
+ *   saturates and further time buys literally nothing - and surfaces well
+ *   over target with no way back down. On 170 fsw / 100 min CCR it spent
+ *   353 min to reach 4.63% against a 2.30% target that a global search meets
+ *   in 262 min. Deep stop time is not interchangeable with shallow stop
+ *   time, and no purely local rule can see that.
  *
- * (b) is what allocates the stop time, and it has to be a comparison rather
- * than a threshold. Asking only "does another minute here still lower my
- * risk?" is not enough: it does, almost everywhere, so the walker would pay
- * off the entire obligation at the first stop deep enough to have one. That
- * produces schedules that meet the target with several times more total stop
- * time than needed - the deep-stop pathology. Both branches of (b) spend the
- * same minute, so scoring them against each other asks the question that
- * actually matters, which depth that minute is worth more at, and time
- * migrates shallow on its own until the last stop, where the shallower
- * alternative is the surface and the comparison reduces to "does staying
- * still pay?".
+ * The greedy is coarse-to-fine (block sizes halving from 32 min to 1 min,
+ * backing off a block rather than overshooting the target) because at one
+ * score per candidate per block the fine-grained version is too slow to run
+ * on every planner keystroke.
  *
- * That is the same allocation libdeco's own lem_generate_schedule() reaches
- * by global greedy search, expressed locally so the planner's own walker can
- * drive it. It also terminates unconditionally, which matters more than it
- * sounds: LEM risk is not always monotone in stop time. At a deep stop on a
- * bottom mix the slow compartments are still on-gassing, so waiting there
- * *raises* surfacing risk, and out-of-calibration (see below) it can rise
- * with stop time even shallow. A ceiling-style "wait for it to clear" test
- * would hang; (b) always eventually prefers the shallower option. If the
- * target is simply unreachable, the walker surfaces rather than hanging, and
- * the plan notes report the risk actually achieved.
+ * Termination does not depend on the target being reachable, which matters:
+ * LEM risk is not always monotone in stop time. At a deep stop on a bottom
+ * mix the slow compartments are still on-gassing, so waiting there *raises*
+ * surfacing risk, and out of calibration (see below) it can rise with stop
+ * time even shallow. When no candidate block reduces risk any further the
+ * greedy stops, the plan is emitted as far as it got, and the notes report
+ * the risk actually achieved against the target asked for.
  *
  * SCOPE AND CAVEATS, all deliberate:
  *
@@ -68,11 +73,12 @@
  *   and the planner will return a short one that does not meet target. Use
  *   these sets with the gas they were fitted for, as with the printed Navy
  *   tables.
- * - The trial continuation breathes one gas all the way up, the one passed to
- *   trial_ascent(), exactly as the deterministic trial ascent does. Deco gas
- *   switches shallower than the trial depth are therefore not credited when
- *   deciding to leave a stop, which is conservative: the real ascent switches
- *   to a richer mix and scores lower than the trial predicted.
+ * - The allocation is planned against the nominal gas schedule: each candidate
+ *   stop is scored on the gas the walker's gas list selects for that depth.
+ *   Options that move a switch at run time (switch_at_req_stop, backgas
+ *   breaks, bailout) are therefore not reflected in the allocation, so the
+ *   emitted plan can score slightly better or worse than planned; the notes
+ *   report the achieved figure, which is computed from the emitted plan.
  * - The ceiling drawn on the planner's profile is Buehlmann's, since LEM has
  *   no ceiling; only the stop schedule is LEM-derived. The plan notes say so.
  * - Tissue loading inherited from a previous dive (init_decompression) is not
@@ -103,12 +109,18 @@ static const double fsw_per_bar = 33.0 / 1.01325;
  * profile the walker will actually emit. */
 static const int trial_timestep = 2;
 
-/* Probe used to answer "does waiting longer still help?". One minute is the
- * granularity Navy schedules are written at, and the granularity the planner's
- * stop search converges to. */
-static const int marginal_probe_seconds = 60;
+/* Greedy block sizes. One minute is the granularity Navy schedules are
+ * written at and the finest the allocation needs; 32 min is where it starts,
+ * halving down, so a long obligation is laid down in a few dozen scores
+ * instead of a few thousand. */
+static const int greedy_coarse_block_seconds = 32 * 60;
+static const int greedy_fine_block_seconds = 60;
 
-/* A minute of stop time must buy at least this much reduction in P_DCS to be
+/* Total stop time the allocator will lay down before giving up. Past this the
+ * dive is not a decompression problem any more. */
+static const int greedy_max_total_seconds = 12 * 3600;
+
+/* A block of stop time must buy at least this much reduction in P_DCS to be
  * worth spending. Set well above the scorer's own quadrature noise at the
  * search step below (which is a few times 1e-7), and far below any risk
  * difference a diver would care about. */
@@ -122,14 +134,15 @@ const int lem_paramset_count = 2;
 
 /* The scorer is used two ways, and they want different quadrature steps.
  *
- * Reporting wants the parameter set's native 1 s step. Searching does not:
- * the walker makes a few hundred trial ascents per plan, and at 1 s each
- * score costs ~2.4 ms, which would put seconds of latency into every planner
- * keystroke. At a 6 s step a score costs ~0.5 ms and P_DCS moves by ~3e-7 -
- * five orders of magnitude below the target risks anyone plans to, and the
- * error is systematic, so it very nearly cancels in the differences the
- * criterion actually compares. The surface tail is NOT shortened: most of the
- * risk accrues after surfacing, so truncating it would change the answer. */
+ * Reporting wants the parameter set's native 1 s step. The allocation search
+ * does not: it scores every candidate stop for every block it lays down, a
+ * few hundred scores per plan, and at 1 s each costs ~2.4 ms - seconds of
+ * latency on every planner keystroke. At a 6 s step a score costs ~0.5 ms and
+ * P_DCS moves by ~3e-7, five orders of magnitude below the target risks
+ * anyone plans to, and the error is systematic so it very nearly cancels in
+ * the differences the greedy compares. The surface tail is NOT shortened:
+ * most of the risk accrues after surfacing, so truncating it would change the
+ * answer. */
 static const double search_dt_min = 6.0 / 60.0;
 
 static const deco::LemParams &active_paramset(bool for_search)
@@ -308,82 +321,148 @@ void lem_add_segment(struct deco_state *ds, double pressure_bar, struct gasmix g
 }
 
 /* ------------------------------------------------------------------------
- * The probabilistic trial ascent
+ * The global stop-time allocation
  * ---------------------------------------------------------------------- */
 
-/* Score the profile so far plus a hypothetical continuation: wait
- * `wait_time` seconds at `trial_depth`, ascend to `hold_depth` and wait
- * `hold_time` seconds there, then ascend to the surface. Passing
- * hold_time = 0 gives the plain "leave now and surface" continuation.
- * `for_search` selects the coarse quadrature step. */
-static double pdcs_after_ascent(const struct deco_state *ds, const struct dive *dive, int wait_time,
-				depth_t trial_depth, depth_t hold_depth, int hold_time,
-				depth_t avg_depth, int bottom_time, struct gasmix gasmix,
-				int ccpo2_mbar, enum divemode_t divemode, bool for_search)
+/* The allocation the walker is currently serving. File-static because it is a
+ * per-plan decision rather than tissue state, the same way set_gf() and
+ * set_vpmb_conservatism() hold the planner's other model settings - and, like
+ * them, this makes plan() non-reentrant. */
+namespace {
+struct lem_allocation {
+	std::vector<depth_t> depths;	/* deepest first */
+	std::vector<int> seconds;	/* hold time allocated at each depth */
+	bool valid = false;
+};
+}
+static lem_allocation allocation;
+
+static double depth_to_fsw(const struct dive *dive, depth_t depth, double surface_bar)
 {
-	if (ds->lem_profile.empty())
-		return 0.0;
-
-	std::vector<lem_node> profile = ds->lem_profile;
-	double clock = ds->lem_clock_min;
-	lem_breathing b = resolve_breathing(gasmix, ccpo2_mbar, divemode);
-	double trial_fsw = std::max((dive->depth_to_bar(trial_depth) - ds->lem_surface_bar) * fsw_per_bar, 0.0);
-
-	if (wait_time > 0)
-		append_leg(profile, clock, trial_fsw, b, wait_time);
-	if (hold_time > 0 && hold_depth.mm < trial_depth.mm) {
-		append_ascent(profile, clock, dive, trial_depth, hold_depth, avg_depth, bottom_time,
-			      b, ds->lem_surface_bar);
-		double hold_fsw = std::max((dive->depth_to_bar(hold_depth) - ds->lem_surface_bar) * fsw_per_bar, 0.0);
-		append_leg(profile, clock, hold_fsw, b, hold_time);
-		append_ascent(profile, clock, dive, hold_depth, 0_m, avg_depth, bottom_time,
-			      b, ds->lem_surface_bar);
-	} else {
-		append_ascent(profile, clock, dive, trial_depth, 0_m, avg_depth, bottom_time,
-			      b, ds->lem_surface_bar);
-	}
-
-	return deco::lem_score(active_paramset(for_search), to_scorer_profile(profile)).p_dcs;
+	return std::max((dive->depth_to_bar(depth) - surface_bar) * fsw_per_bar, 0.0);
 }
 
-double lem_pdcs_after_ascent(const struct deco_state *ds, const struct dive *dive, int wait_time,
-			     depth_t trial_depth, depth_t avg_depth, int bottom_time,
-			     struct gasmix gasmix, int ccpo2_mbar, enum divemode_t divemode)
+/* Score one candidate allocation: the profile walked so far, continued by
+ * ascending through the candidate stops holding `times` at each, then
+ * surfacing. Travel to a stop is made on the gas being left; the switch
+ * happens on arrival, as the walker does it. */
+static double score_allocation(const struct deco_state *ds, const struct dive *dive,
+			       const std::vector<lem_stop_candidate> &candidates,
+			       const std::vector<int> &times, depth_t bottom_depth,
+			       depth_t avg_depth, int bottom_time)
 {
-	return pdcs_after_ascent(ds, dive, wait_time, trial_depth, 0_m, 0, avg_depth, bottom_time,
-				 gasmix, ccpo2_mbar, divemode, false);
+	std::vector<lem_node> profile = ds->lem_profile;
+	double clock = ds->lem_clock_min;
+
+	/* Travel off the bottom is on whatever the bottom leg ended on. */
+	lem_breathing b;
+	b.fo2 = profile.back().fo2;
+	b.fhe = profile.back().fhe;
+	b.po2_setpoint = profile.back().po2_setpoint;
+
+	depth_t depth = bottom_depth;
+	for (size_t i = 0; i < candidates.size(); i++) {
+		if (candidates[i].depth.mm >= depth.mm)
+			continue;
+		append_ascent(profile, clock, dive, depth, candidates[i].depth, avg_depth,
+			      bottom_time, b, ds->lem_surface_bar);
+		depth = candidates[i].depth;
+		b = resolve_breathing(candidates[i].gasmix, candidates[i].ccpo2_mbar,
+				      candidates[i].divemode);
+		if (times[i] > 0)
+			append_leg(profile, clock, depth_to_fsw(dive, depth, ds->lem_surface_bar),
+				   b, times[i]);
+	}
+	append_ascent(profile, clock, dive, depth, 0_m, avg_depth, bottom_time, b, ds->lem_surface_bar);
+
+	return deco::lem_score(active_paramset(true), to_scorer_profile(profile)).p_dcs;
+}
+
+void lem_plan_stops(const struct deco_state *ds, const struct dive *dive,
+		    const std::vector<lem_stop_candidate> &candidates, depth_t bottom_depth,
+		    depth_t avg_depth, int bottom_time)
+{
+	allocation = lem_allocation();
+	if (!ds || !dive || ds->lem_profile.empty() || candidates.empty())
+		return;
+
+	std::vector<int> times(candidates.size(), 0);
+	auto score = [&](const std::vector<int> &t) {
+		return score_allocation(ds, dive, candidates, t, bottom_depth, avg_depth, bottom_time);
+	};
+
+	const double target = lem_target_pdcs();
+	double current = score(times);	/* direct ascent */
+	int total = 0;
+
+	for (int block = greedy_coarse_block_seconds; block >= greedy_fine_block_seconds; block /= 2) {
+		while (current > target && total + block <= greedy_max_total_seconds) {
+			/* Where does this block of time buy the most? */
+			int best = -1;
+			double best_score = current;
+			for (size_t i = 0; i < candidates.size(); i++) {
+				if (candidates[i].depth.mm >= bottom_depth.mm)
+					continue;
+				std::vector<int> trial = times;
+				trial[i] += block;
+				double p = score(trial);
+				if (p < best_score) {
+					best_score = p;
+					best = static_cast<int>(i);
+				}
+			}
+			if (best < 0 || best_score > current - marginal_gain_epsilon)
+				break;	/* nothing this size buys anything - go finer */
+			if (best_score <= target && block > greedy_fine_block_seconds)
+				break;	/* would overshoot - lay it down finer instead */
+			times[best] += block;
+			total += block;
+			current = best_score;
+		}
+	}
+
+	allocation.valid = true;
+	for (size_t i = 0; i < candidates.size(); i++) {
+		allocation.depths.push_back(candidates[i].depth);
+		allocation.seconds.push_back(times[i]);
+	}
+}
+
+/* ------------------------------------------------------------------------
+ * Serving the allocation
+ * ---------------------------------------------------------------------- */
+
+/* Time already spent at the depth the profile currently sits at. The walker
+ * arrives at a stop, which puts a node at that depth, and every segment it
+ * then adds there extends the tail; so the run of trailing nodes at this
+ * depth is exactly the time served. */
+static int seconds_at_tail_depth(const std::vector<lem_node> &profile, double depth_fsw)
+{
+	if (profile.empty() || !same_depth(profile.back(), depth_fsw))
+		return 0;
+	size_t i = profile.size() - 1;
+	while (i > 0 && same_depth(profile[i - 1], depth_fsw))
+		i--;
+	return static_cast<int>(lrint((profile.back().time_min - profile[i].time_min) * 60.0));
 }
 
 bool lem_trial_ascent(const struct deco_state *ds, const struct dive *dive, int wait_time,
-		      depth_t trial_depth, depth_t stoplevel, depth_t avg_depth, int bottom_time,
-		      struct gasmix gasmix, int ccpo2_mbar, enum divemode_t divemode)
+		      depth_t trial_depth)
 {
-	if (ds->lem_profile.empty())
+	if (!allocation.valid || ds->lem_profile.empty())
 		return true;
 
-	double now = pdcs_after_ascent(ds, dive, wait_time, trial_depth, 0_m, 0, avg_depth,
-				       bottom_time, gasmix, ccpo2_mbar, divemode, true);
-	if (now <= lem_target_pdcs())
-		return true; /* (a) the target is met - go up */
+	int allocated = 0;
+	for (size_t i = 0; i < allocation.depths.size(); i++) {
+		if (std::abs(allocation.depths[i].mm - trial_depth.mm) <= 1) {
+			allocated = allocation.seconds[i];
+			break;
+		}
+	}
+	if (allocated <= 0)
+		return true;
 
-	/* (b) Spend the next minute wherever it is worth more. Both branches
-	 * cost the same minute; the only difference is the depth it is spent
-	 * at, so this is a straight comparison of what that minute buys. */
-	double stay = pdcs_after_ascent(ds, dive, wait_time + marginal_probe_seconds, trial_depth,
-					0_m, 0, avg_depth, bottom_time, gasmix, ccpo2_mbar,
-					divemode, true);
-
-	/* At the last stop the shallower alternative is the surface, where a
-	 * "stop" is not a thing: the dive is over. Scoring one as if it were
-	 * would also charge the model a minute of the breathing gas at 1 atm,
-	 * which for a rebreather is a minute of near-pure O2 and beats any
-	 * real stop on inert-gas washout alone. So the alternative is simply
-	 * surfacing, and (b) reduces to "does staying still pay?". */
-	double move = stoplevel.mm > 0
-			      ? pdcs_after_ascent(ds, dive, wait_time, trial_depth, stoplevel,
-						  marginal_probe_seconds, avg_depth, bottom_time,
-						  gasmix, ccpo2_mbar, divemode, true)
-			      : now;
-
-	return move <= stay + marginal_gain_epsilon;
+	int served = seconds_at_tail_depth(ds->lem_profile,
+					   depth_to_fsw(dive, trial_depth, ds->lem_surface_bar));
+	return served + wait_time >= allocated;
 }

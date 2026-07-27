@@ -13,6 +13,7 @@ private slots:
 	void testLowerTargetGivesMoreDeco();
 	void testNoDecoWhenTargetAlreadyMet();
 	void testNonMonotonicRiskTerminates();
+	void testLargeExposureAllocatesDeepStops();
 };
 
 #endif // TESTLEMPLANNER_H

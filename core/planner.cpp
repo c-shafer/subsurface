@@ -513,12 +513,11 @@ static bool trial_ascent(struct deco_state *ds, int wait_time, depth_t trial_dep
 	deco_state_cache trial_cache;
 
 	// AI-generated (Claude)
-	// LEM is probabilistic and has no ceiling to test against: it answers
-	// the question this function asks directly, by scoring the ascent.
-	// See core/lemplanner.cpp.
+	// LEM is probabilistic and has no ceiling to test against. Its stop
+	// times were chosen up front by lem_plan_stops(); here we only ask
+	// whether the one for this depth has been served. See lemplanner.cpp.
 	if (pref_deco_mode(true) == LEM)
-		return lem_trial_ascent(ds, dive, wait_time, trial_depth, stoplevel, avg_depth,
-					bottom_time, gasmix, po2, divemode);
+		return lem_trial_ascent(ds, dive, wait_time, trial_depth);
 
 	// For consistency with other VPM-B implementations, we should not start the ascent while the ceiling is
 	// deeper than the next stop (thus the offgasing during the ascent is ignored).
@@ -837,6 +836,35 @@ planner_error_t plan(struct deco_state *ds, struct diveplan &diveplan, struct di
 		plan_add_segment(diveplan, bailoutsegment, depth, current_cylinder, po2, false, divemode);
 		bottom_time += bailoutsegment;
 	}
+	// AI-generated (Claude)
+	// LEM chooses all its stop times at once, before the ascent, because no
+	// local rule can trade deep stop time against shallow. Walk the stop
+	// levels the ascent will pass, pairing each with the gas the gas list
+	// selects there exactly as the loop below will, and hand them over.
+	if (pref_deco_mode(true) == LEM) {
+		std::vector<lem_stop_candidate> candidates;
+		int lem_cylinder = current_cylinder;
+		int lem_po2 = po2;
+		int lem_gi = static_cast<int>(gaschanges.size()) - 1;
+		for (int i = static_cast<int>(stopidx); i >= 0; i--) {
+			if (stoplevels[i].mm <= 0 || stoplevels[i].mm >= depth.mm)
+				continue;
+			while (lem_gi >= 0 && stoplevels[i].mm <= gaschanges[lem_gi].depth) {
+				lem_cylinder = gaschanges[lem_gi].gasidx;
+				if (divemode == CCR)
+					lem_po2 = setpoint_change(dive, lem_cylinder);
+				lem_gi--;
+			}
+			lem_stop_candidate c;
+			c.depth = stoplevels[i];
+			c.gasmix = dive->get_cylinder(lem_cylinder)->gasmix;
+			c.ccpo2_mbar = lem_po2;
+			c.divemode = divemode;
+			candidates.push_back(c);
+		}
+		lem_plan_stops(ds, dive, candidates, depth, avg_depth, bottom_time);
+	}
+
 	previous_deco_time = 100000000;
 	ds->deco_time = 10000000;
 	bottom_cache.cache(ds);  // Lets us make several iterations

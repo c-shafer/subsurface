@@ -39,19 +39,25 @@ extern void lem_clear(struct deco_state *ds, double surface_pressure_bar);
 extern void lem_add_segment(struct deco_state *ds, double pressure_bar, struct gasmix gasmix,
 			    int period_in_seconds, int ccpo2_mbar, enum divemode_t divemode);
 
-/* P_DCS of the profile walked so far, continued by waiting `wait_time`
- * seconds at `trial_depth` and then ascending straight to the surface on
- * `gasmix`. This is the quantity the planner's stop walker is driven by. */
-extern double lem_pdcs_after_ascent(const struct deco_state *ds, const struct dive *dive,
-				    int wait_time, depth_t trial_depth, depth_t avg_depth,
-				    int bottom_time, struct gasmix gasmix, int ccpo2_mbar,
-				    enum divemode_t divemode);
+/* One stop depth the ascent will pass, and what the diver will be breathing
+ * there, as the planner's gas list selects it. */
+struct lem_stop_candidate {
+	depth_t depth;
+	struct gasmix gasmix;
+	int ccpo2_mbar = 0;
+	enum divemode_t divemode = OC;
+};
 
-/* The LEM analogue of a ceiling test: true when the diver may leave
- * `trial_depth` for `stoplevel`. See lemplanner.cpp for the criterion. */
+/* Choose the stop times for the ascent about to be walked and install them.
+ * Call once per plan, after the bottom profile has been walked into `ds` and
+ * before the ascent. `candidates` is deepest-first. See lemplanner.cpp. */
+extern void lem_plan_stops(const struct deco_state *ds, const struct dive *dive,
+			   const std::vector<lem_stop_candidate> &candidates,
+			   depth_t bottom_depth, depth_t avg_depth, int bottom_time);
+
+/* True when the diver has served the stop time allocated at `trial_depth`
+ * (counting `wait_time` more seconds there), so the walker may ascend. */
 extern bool lem_trial_ascent(const struct deco_state *ds, const struct dive *dive,
-			     int wait_time, depth_t trial_depth, depth_t stoplevel,
-			     depth_t avg_depth, int bottom_time, struct gasmix gasmix,
-			     int ccpo2_mbar, enum divemode_t divemode);
+			     int wait_time, depth_t trial_depth);
 
 #endif // LEMPLANNER_H
