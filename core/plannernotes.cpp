@@ -24,6 +24,7 @@
 #include "format.h"
 #include "lemscore.h"
 #include "subsurface-string.h"
+#include "lemplanner.h"
 #include "thalmann.h"
 #include "version.h"
 
@@ -94,6 +95,7 @@ extern std::string get_planner_disclaimer_formatted()
 	// AI-generated (Claude)
 	const char *deco = pref_deco_mode(true) == VPMB     ? translate("gettextFromC", "VPM-B")
 			 : pref_deco_mode(true) == THALMANN ? translate("gettextFromC", "THALMANN")
+			 : pref_deco_mode(true) == LEM      ? translate("gettextFromC", "LEM")
 							    : translate("gettextFromC", "BUHLMANN");
 	return format_string_std(get_planner_disclaimer(), deco);
 }
@@ -467,6 +469,18 @@ void diveplan::add_plan_to_notes(struct dive &dive, bool show_disclaimer, planne
 		// AI-generated (Claude)
 		buf += casprintf_loc(translate("gettextFromC", "Deco model: Thalmann EL-DCM (U.S. Navy), parameter set %s"),
 			     thalmann_paramset_names[prefs.planner_thalmann_paramset >= 0 && prefs.planner_thalmann_paramset < thalmann_paramset_count ? prefs.planner_thalmann_paramset : 0]);
+	} else if (pref_deco_mode(true) == LEM) {
+		// AI-generated (Claude)
+		int lem_set = prefs.planner_lem_paramset >= 0 && prefs.planner_lem_paramset < lem_paramset_count ? prefs.planner_lem_paramset : 0;
+		buf += casprintf_loc(translate("gettextFromC", "Deco model: LEM probabilistic (U.S. Navy, NEDU TR 02-10), parameter set %s, planned to a target pDCS of %.2f%%"),
+			     lem_paramset_names[lem_set], lem_target_pdcs() * 100.0);
+		if (pdcs.valid) {
+			double achieved = lem_set == 0 ? pdcs.pdcs_he8n25 : pdcs.pdcs_hen2_2016;
+			if (achieved > lem_target_pdcs())
+				buf += casprintf_loc(translate("gettextFromC", "<br/>\nWarning: the target pDCS was not reachable on this dive; this schedule achieves %.2f%%"),
+					     achieved * 100.0);
+		}
+		buf += translate("gettextFromC", "<br/>\nNote: LEM is a risk model and defines no ceiling. The stop schedule is LEM-derived; any ceiling drawn on the profile is Bühlmann's.");
 	}
 	buf += "<br/>\n";
 

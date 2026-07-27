@@ -29,6 +29,8 @@ class qPrefDivePlanner : public QObject {
 	Q_PROPERTY(int min_switch_duration READ min_switch_duration WRITE set_min_switch_duration NOTIFY min_switch_durationChanged)
 	Q_PROPERTY(deco_mode planner_deco_mode READ planner_deco_mode WRITE set_planner_deco_mode NOTIFY planner_deco_modeChanged)
 	Q_PROPERTY(int planner_thalmann_paramset READ planner_thalmann_paramset WRITE set_planner_thalmann_paramset NOTIFY planner_thalmann_paramsetChanged)
+	Q_PROPERTY(int planner_lem_paramset READ planner_lem_paramset WRITE set_planner_lem_paramset NOTIFY planner_lem_paramsetChanged)
+	Q_PROPERTY(int planner_lem_target_pdcs READ planner_lem_target_pdcs WRITE set_planner_lem_target_pdcs NOTIFY planner_lem_target_pdcsChanged)
 	Q_PROPERTY(int problemsolvingtime READ problemsolvingtime WRITE set_problemsolvingtime NOTIFY problemsolvingtimeChanged)
 	Q_PROPERTY(int reserve_gas READ reserve_gas WRITE set_reserve_gas NOTIFY reserve_gasChanged)
 	Q_PROPERTY(int sacfactor READ sacfactor WRITE set_sacfactor NOTIFY sacfactorChanged)
@@ -68,6 +70,8 @@ public:
 	static int surface_segment() { return prefs.surface_segment; }
 	static deco_mode planner_deco_mode() { return prefs.planner_deco_mode; }
 	static int planner_thalmann_paramset() { return prefs.planner_thalmann_paramset; }
+	static int planner_lem_paramset() { return prefs.planner_lem_paramset; }
+	static int planner_lem_target_pdcs() { return prefs.planner_lem_target_pdcs; }
 	static int problemsolvingtime() { return prefs.problemsolvingtime; }
 	static int reserve_gas() { return prefs.reserve_gas; }
 	static int sacfactor() { return prefs.sacfactor; }
@@ -99,6 +103,8 @@ public slots:
 	static void set_surface_segment(int vallue);
 	static void set_planner_deco_mode(deco_mode value);
 	static void set_planner_thalmann_paramset(int value);
+	static void set_planner_lem_paramset(int value);
+	static void set_planner_lem_target_pdcs(int value);
 	static void set_problemsolvingtime(int value);
 	static void set_reserve_gas(int value);
 	static void set_sacfactor(int value);
@@ -130,6 +136,8 @@ signals:
 	void surface_segmentChanged(int value);
 	void planner_deco_modeChanged(deco_mode value);
 	void planner_thalmann_paramsetChanged(int value);
+	void planner_lem_paramsetChanged(int value);
+	void planner_lem_target_pdcsChanged(int value);
 	void problemsolvingtimeChanged(int value);
 	void reserve_gasChanged(int value);
 	void sacfactorChanged(int value);
@@ -164,6 +172,8 @@ private:
 	static void disk_surface_segment(bool doSync);
 	static void disk_planner_deco_mode(bool doSync);
 	static void disk_planner_thalmann_paramset(bool doSync);
+	static void disk_planner_lem_paramset(bool doSync);
+	static void disk_planner_lem_target_pdcs(bool doSync);
 	static void disk_problemsolvingtime(bool doSync);
 	static void disk_reserve_gas(bool doSync);
 	static void disk_sacfactor(bool doSync);

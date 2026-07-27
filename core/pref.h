@@ -32,7 +32,8 @@ enum deco_mode {
 	BUEHLMANN,
 	RECREATIONAL,
 	VPMB,
-	THALMANN
+	THALMANN,
+	LEM
 };
 
 enum def_file_behavior {
@@ -167,6 +168,8 @@ struct preferences {
 	int             surface_segment; // seconds at the surface after planned dive
 	enum deco_mode  planner_deco_mode;
 	int             planner_thalmann_paramset; // index into thalmann_paramset_names
+	int             planner_lem_paramset; // index into lem_paramset_names
+	int             planner_lem_target_pdcs; // target P_DCS, hundredths of a percent
 	int             problemsolvingtime;
 	int             reserve_gas;
 	int             sacfactor;

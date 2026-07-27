@@ -70,6 +70,8 @@ set(SUBSURFACE_CORE_LIB_SRCS
 	datatrak.h
 	deco.cpp
 	deco.h
+	lemplanner.cpp
+	lemplanner.h
 	lemscore.cpp
 	lemscore.h
 	device.cpp

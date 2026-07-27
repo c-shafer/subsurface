@@ -68,6 +68,8 @@ preferences::preferences() :
 	surface_segment(0),
 	planner_deco_mode(BUEHLMANN),
 	planner_thalmann_paramset(0),
+	planner_lem_paramset(0),
+	planner_lem_target_pdcs(230),
 	problemsolvingtime(4),
 	reserve_gas(40000),
 	sacfactor(400),

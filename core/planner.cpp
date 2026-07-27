@@ -512,6 +512,14 @@ static bool trial_ascent(struct deco_state *ds, int wait_time, depth_t trial_dep
 	bool clear_to_ascend = true;
 	deco_state_cache trial_cache;
 
+	// AI-generated (Claude)
+	// LEM is probabilistic and has no ceiling to test against: it answers
+	// the question this function asks directly, by scoring the ascent.
+	// See core/lemplanner.cpp.
+	if (pref_deco_mode(true) == LEM)
+		return lem_trial_ascent(ds, dive, wait_time, trial_depth, stoplevel, avg_depth,
+					bottom_time, gasmix, po2, divemode);
+
 	// For consistency with other VPM-B implementations, we should not start the ascent while the ceiling is
 	// deeper than the next stop (thus the offgasing during the ascent is ignored).
 	// However, we still need to make sure we don't break the ceiling due to on-gassing during ascent.

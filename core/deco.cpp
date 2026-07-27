@@ -28,6 +28,7 @@
 #include "planner.h"
 #include "pref.h"
 #include "thalmann.h"
+#include "lemplanner.h"
 
 template <typename T>
 T cube(T x)
@@ -478,6 +479,11 @@ void add_segment(struct deco_state *ds, double pressure, struct gasmix gasmix, i
 	// AI-generated (Claude)
 	if (pref_deco_mode(in_planner) == THALMANN)
 		thalmann_add_segment(ds, pressure, gasmix, period_in_seconds, ccpo2, divemode);
+	// AI-generated (Claude)
+	// LEM keeps no tissue state of its own: it records the profile, and
+	// scores it whole when the planner asks about ascending.
+	if (pref_deco_mode(in_planner) == LEM)
+		lem_add_segment(ds, pressure, gasmix, period_in_seconds, ccpo2, divemode);
 	ds->icd_warning = icd;
 	return;
 }
@@ -528,6 +534,9 @@ void clear_deco(struct deco_state *ds, double surface_pressure, bool in_planner)
 	// AI-generated (Claude)
 	if (pref_deco_mode(in_planner) == THALMANN)
 		thalmann_clear(ds, surface_pressure);
+	// AI-generated (Claude)
+	if (pref_deco_mode(in_planner) == LEM)
+		lem_clear(ds, surface_pressure);
 }
 
 void deco_state_cache::cache(const struct deco_state *src)

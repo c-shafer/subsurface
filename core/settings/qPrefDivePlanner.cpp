@@ -37,6 +37,8 @@ void qPrefDivePlanner::loadSync(bool doSync)
 	disk_min_switch_duration(doSync);
 	disk_planner_deco_mode(doSync);
 	disk_planner_thalmann_paramset(doSync);
+	disk_planner_lem_paramset(doSync);
+	disk_planner_lem_target_pdcs(doSync);
 	disk_problemsolvingtime(doSync);
 	disk_reserve_gas(doSync);
 	disk_sacfactor(doSync);
@@ -87,6 +89,10 @@ HANDLE_PREFERENCE_INT(DivePlanner, "surface_segment", surface_segment);
 HANDLE_PREFERENCE_ENUM(DivePlanner, deco_mode, "deco_mode", planner_deco_mode);
 
 HANDLE_PREFERENCE_INT(DivePlanner, "thalmann_paramset", planner_thalmann_paramset);
+
+HANDLE_PREFERENCE_INT(DivePlanner, "lem_paramset", planner_lem_paramset);
+
+HANDLE_PREFERENCE_INT(DivePlanner, "lem_target_pdcs", planner_lem_target_pdcs);
 
 HANDLE_PREFERENCE_INT(DivePlanner, "problemsolvingtime", problemsolvingtime);
 

@@ -5,7 +5,9 @@
 #include "units.h"
 #include "gas.h"
 #include "divemode.h"
+#include "lemplanner.h"
 #include <memory>
+#include <vector>
 
 struct dive;
 struct divecomputer;
@@ -48,6 +50,15 @@ struct deco_state {
 	// gas tension per compartment, in fsw; see core/thalmann.cpp.
 	double thalmann_tension_fsw[16] = {};
 	double thalmann_surface_bar = 1.01325;
+
+	// AI-generated (Claude)
+	// LEM state (deco mode LEM). The probabilistic model has no tissue
+	// tensions to carry: its state is the profile walked so far, which is
+	// re-scored whole every time the planner asks whether it may ascend.
+	// See core/lemplanner.cpp.
+	std::vector<lem_node> lem_profile;
+	double lem_clock_min = 0.0;
+	double lem_surface_bar = 1.01325;
 };
 
 extern const double buehlmann_N2_t_halflife[];
