@@ -294,7 +294,7 @@
             </property>
            </spacer>
           </item>
-          <item row="22" column="1" colspan="2">
+          <item row="24" column="1" colspan="2">
            <widget class="QCheckBox" name="switch_at_req_stop">
             <property name="toolTip">
              <string>Postpone gas change if a stop is not required</string>
@@ -304,7 +304,7 @@
             </property>
            </widget>
           </item>
-          <item row="18" column="1" colspan="2">
+          <item row="20" column="1" colspan="2">
            <widget class="QCheckBox" name="lastStop">
             <property name="text">
              <string>Last stop at 6m</string>
@@ -334,7 +334,7 @@
             </property>
            </widget>
           </item>
-          <item row="23" column="2">
+          <item row="25" column="2">
            <widget class="QSpinBox" name="min_switch_duration">
             <property name="suffix">
              <string>min</string>
@@ -353,14 +353,14 @@
             </property>
            </widget>
           </item>
-          <item row="20" column="1" colspan="2">
+          <item row="22" column="1" colspan="2">
            <widget class="QCheckBox" name="backgasBreaks">
             <property name="text">
              <string>Plan backgas breaks</string>
             </property>
            </widget>
           </item>
-          <item row="25" column="1">
+          <item row="27" column="1">
            <spacer name="verticalSpacer_2">
             <property name="orientation">
              <enum>Qt::Vertical</enum>
@@ -373,7 +373,7 @@
             </property>
            </spacer>
           </item>
-          <item row="23" column="1">
+          <item row="25" column="1">
            <widget class="QLabel" name="label_min_switch_duration">
             <property name="text">
              <string>Min. switch duration O₂% below 100%</string>
@@ -463,6 +463,61 @@
           <item row="16" column="2">
            <widget class="QComboBox" name="thalmannParamset"/>
           </item>
+          <item row="17" column="1">
+           <widget class="QRadioButton" name="lem_deco">
+            <property name="toolTip">
+             <string>U.S. Navy LEM probabilistic decompression model (NEDU TR 02-10): stops are computed to reach a target probability of decompression sickness</string>
+            </property>
+            <property name="text">
+             <string>LEM (USN, probabilistic) deco</string>
+            </property>
+           </widget>
+          </item>
+          <item row="18" column="1">
+           <widget class="QLabel" name="label_lem_paramset">
+            <property name="text">
+             <string>Parameter set</string>
+            </property>
+            <property name="indent">
+             <number>25</number>
+            </property>
+           </widget>
+          </item>
+          <item row="18" column="2">
+           <widget class="QComboBox" name="lemParamset"/>
+          </item>
+          <item row="19" column="1">
+           <widget class="QLabel" name="label_lem_target_pdcs">
+            <property name="text">
+             <string>Target pDCS</string>
+            </property>
+            <property name="indent">
+             <number>25</number>
+            </property>
+           </widget>
+          </item>
+          <item row="19" column="2">
+           <widget class="QDoubleSpinBox" name="lem_target_pdcs">
+            <property name="toolTip">
+             <string>Probability of decompression sickness the schedule is planned to</string>
+            </property>
+            <property name="suffix">
+             <string>%</string>
+            </property>
+            <property name="decimals">
+             <number>2</number>
+            </property>
+            <property name="minimum">
+             <double>0.100000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>20.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.100000000000000</double>
+            </property>
+           </widget>
+          </item>
           <item row="4" column="1" alignment="Qt::AlignHCenter">
            <widget class="QCheckBox" name="safetystop">
             <property name="layoutDirection">
@@ -522,14 +577,14 @@
             </property>
            </widget>
           </item>
-          <item row="24" column="1">
+          <item row="26" column="1">
            <widget class="QLabel" name="label_surface_segment">
             <property name="text">
              <string>Surface segment</string>
             </property>
            </widget>
           </item>
-          <item row="24" column="2">
+          <item row="26" column="2">
            <widget class="QSpinBox" name="surface_segment">
             <property name="suffix">
              <string>min</string>
@@ -866,6 +921,9 @@
   <tabstop>vpmb_conservatism</tabstop>
   <tabstop>thalmann_deco</tabstop>
   <tabstop>thalmannParamset</tabstop>
+  <tabstop>lem_deco</tabstop>
+  <tabstop>lemParamset</tabstop>
+  <tabstop>lem_target_pdcs</tabstop>
   <tabstop>drop_stone_mode</tabstop>
   <tabstop>lastStop</tabstop>
   <tabstop>backgasBreaks</tabstop>

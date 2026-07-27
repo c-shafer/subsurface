@@ -6,6 +6,8 @@
 #include "qt-models/diveplannermodel.h"
 #include "qt-models/cylindermodel.h"
 
+#include <cmath>
+
 // Planning values
 deco_mode PlannerShared::planner_deco_mode()
 {
@@ -24,6 +26,30 @@ int PlannerShared::planner_thalmann_paramset()
 void PlannerShared::set_planner_thalmann_paramset(int value)
 {
 	qPrefDivePlanner::set_planner_thalmann_paramset(value);
+	DivePlannerPointsModel::instance()->emitDataChanged();
+}
+
+// AI-generated (Claude)
+int PlannerShared::planner_lem_paramset()
+{
+	return qPrefDivePlanner::planner_lem_paramset();
+}
+void PlannerShared::set_planner_lem_paramset(int value)
+{
+	qPrefDivePlanner::set_planner_lem_paramset(value);
+	DivePlannerPointsModel::instance()->emitDataChanged();
+}
+
+// The preference is an int in hundredths of a percent, the spin box a
+// percentage with two decimals; convert at this boundary the way sacfactor
+// does.
+int PlannerShared::planner_lem_target_pdcs()
+{
+	return qPrefDivePlanner::planner_lem_target_pdcs();
+}
+void PlannerShared::set_planner_lem_target_pdcs(double value)
+{
+	qPrefDivePlanner::set_planner_lem_target_pdcs(lrint(value * 100.0));
 	DivePlannerPointsModel::instance()->emitDataChanged();
 }
 
