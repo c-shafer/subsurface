@@ -16,6 +16,7 @@
 #include "interpolate.h"
 #include "planner.h"
 #include "pref.h"
+#include "thalmann.h"
 #include "range.h"
 #include "subsurface-time.h"
 #include "gettext.h"
@@ -518,6 +519,8 @@ static bool trial_ascent(struct deco_state *ds, int wait_time, depth_t trial_dep
 	// whether the one for this depth has been served. See lemplanner.cpp.
 	if (pref_deco_mode(true) == LEM)
 		return lem_trial_ascent(ds, dive, wait_time, trial_depth);
+	if (pref_deco_mode(true) == THALMANN)
+		return thalmann_trial_ascent(ds, wait_time, trial_depth);
 
 	// For consistency with other VPM-B implementations, we should not start the ascent while the ceiling is
 	// deeper than the next stop (thus the offgasing during the ascent is ignored).
@@ -863,6 +866,18 @@ planner_error_t plan(struct deco_state *ds, struct diveplan &diveplan, struct di
 			candidates.push_back(c);
 		}
 		lem_plan_stops(ds, dive, candidates, depth, avg_depth, bottom_time);
+	}
+	if (pref_deco_mode(true) == THALMANN) {
+		std::vector<thalmann_deco_leg> switches;
+		for (const auto &g : gaschanges) {
+			thalmann_deco_leg leg;
+			leg.depth.mm = g.depth;
+			leg.gasmix = dive->get_cylinder(g.gasidx)->gasmix;
+			leg.ccpo2_mbar = (divemode == CCR) ? setpoint_change(dive, g.gasidx) : 0;
+			leg.divemode = divemode;
+			switches.push_back(leg);
+		}
+		thalmann_plan_stops(ds, dive, depth, prefs.ascratestops, gas, po2, divemode, switches);
 	}
 
 	previous_deco_time = 100000000;

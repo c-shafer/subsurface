@@ -15,9 +15,10 @@
  *     descent 75 fsw/min, ascent 30 fsw/min
  *       20 fsw : 80 min (total 80 min)
  *
- * Subsurface's planner walks stops on its own grid with its own trial
- * ascent logic, so stop-by-stop agreement is expected only within a
- * few minutes, not exactly.
+ * Stop times are taken from libdeco's generate_ascent_schedule(), so
+ * whole-minute holds should match that implementation. Remaining slack
+ * is the planner's isobaric "drop to first depth" versus libdeco's
+ * ramped descent.
  */
 #include "testthalmann.h"
 #include "core/deco.h"
@@ -221,6 +222,65 @@ void TestThalmann::testOpenCircuitAir()
 	QVERIFY(abs(t20 - 80 * 60) <= 6 * 60);
 	int total = totalStopSeconds(stoptable);
 	QVERIFY(abs(total - 80 * 60) <= 7 * 60);
+}
+
+/* 100 fsw / 100 min air, switch to 80% O2 at 30 ft — mixed_gas_example's
+ * default deco_legs case. libdeco: 40:8, 30:14, 20:65. */
+void TestThalmann::testOpenCircuitAirO2()
+{
+	deco_state_cache cache;
+	std::vector<decostop> stoptable;
+
+	setupThalmannPrefs(0, 75);	// VVal-79, 75 fsw/min descent
+	prefs.switch_at_req_stop = true;
+	dive.dcs[0].divemode = OC;
+
+	diveplan dp;
+	dp.salinity = 10300;
+	dp.surface_pressure = 1_atm;
+	dp.gfhigh = 100;
+	dp.gflow = 100;
+	dp.bottomsac = prefs.bottomsac;
+	dp.decosac = prefs.decosac;
+
+	struct gasmix air = { 21_percent, 0_percent };
+	struct gasmix ean80 = { 80_percent, 0_percent };
+	cylinder_t *cyl0 = dive.get_or_create_cylinder(0);
+	cyl0->gasmix = air;
+	cyl0->type.size = 36_l;
+	cyl0->type.workingpressure = 232_bar;
+	cyl0->cylinder_use = OC_GAS;
+	cylinder_t *cyl1 = dive.get_or_create_cylinder(1);
+	cyl1->gasmix = ean80;
+	cyl1->type.size = 11_l;
+	cyl1->type.workingpressure = 200_bar;
+	cyl1->cylinder_use = OC_GAS;
+	cyl1->depth = m_or_ft(0, 30);
+	reset_cylinders(&dive, true);
+
+	plan_add_segment(dp, 0, m_or_ft(0, 30), 1, 0, true, OC);
+	int droptime = 100 * 60 / 75;
+	plan_add_segment(dp, droptime, m_or_ft(0, 100), 0, 0, true, OC);
+	plan_add_segment(dp, 100 * 60 - droptime, m_or_ft(0, 100), 0, 0, true, OC);
+
+	plan(&test_deco_state, dp, &dive, 0, 60, cache, true, false, &stoptable);
+
+#if DEBUG
+	dive.notes.clear();
+	save_dive(stdout, dive, false);
+	for (auto &stop: stoptable)
+		if (stop.time)
+			printf("stop %d mm: %d s\n", stop.depth, stop.time);
+#endif
+
+	int t40 = stopSeconds(stoptable, feet_to_mm(40));
+	int t30 = stopSeconds(stoptable, feet_to_mm(30));
+	int t20 = stopSeconds(stoptable, feet_to_mm(20));
+	// 40 ft can pick up ~1-2 min from the planner's isobaric drop vs
+	// libdeco's ramped descent; 30/20 should match the example.
+	QVERIFY(abs(t40 - 8 * 60) <= 2 * 60);
+	QVERIFY(abs(t30 - 14 * 60) <= 60);
+	QVERIFY(abs(t20 - 65 * 60) <= 60);
 }
 
 QTEST_GUILESS_MAIN(TestThalmann)

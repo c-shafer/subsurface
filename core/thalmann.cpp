@@ -8,16 +8,22 @@
  * deco-engine contract: clear_deco() initializes tissue state,
  * add_segment() advances it at a given ambient pressure and gas, and
  * tissue_tolerance_calc() returns the tolerated ambient pressure from
- * which deco_allowed_depth() derives the ceiling. The stop-by-stop
- * schedule walker in planner.cpp is Subsurface's own; libdeco's
- * generate_schedule() is not used. Consequences of that division of
- * labor, all deliberate:
+ * which deco_allowed_depth() derives the ceiling. Stop *times* for the
+ * planner are taken from libdeco's generate_ascent_schedule() (same
+ * walker mixed_gas_example uses) and served by planner.cpp the way LEM
+ * stop times are; the Bühlmann 60 s trial-ascent search is not used.
+ * Consequences of that split, all deliberate:
  *
- * - Stop depths follow Subsurface's stop grid (3 m or 10 ft) and stop
- *   times follow the planner's timestep search, so schedules can differ
- *   from the published U.S. Navy tables' conventions (10 fsw grid,
- *   whole-minute holds computed with ascent-washout credit) by a
- *   stop-rounding margin even where the model itself agrees.
+ * - Stop depths follow the regime's 10 fsw grid and last-stop depth
+ *   (20 fsw for the vendored sets). Subsurface's 3 m / 10 ft walker
+ *   still emits the plan, but it serves the precomputed whole-minute
+ *   holds rather than searching. Selecting the 6 m / 20 ft last-stop
+ *   preference lines the walker grid up with the Navy stops.
+ * - TODO: make TTIS (travel time in stops, TR 18-05 p.A-13) configurable.
+ *   Reported Thalmann stop times are hold-only (TTIS=F), matching Table 14.
+ *   Production appendix tables and VVal-79 Appendix D use TTIS=T (stop
+ *   times include travel except the first stop). Add a planner preference
+ *   and, when enabled, fold inter-stop travel into the reported stop times.
  * - The model is single-inert-gas: all inert gas in the breathing mix
  *   (N2 and He alike) is lumped into one tension tracked per
  *   compartment. The He-O2 parameter sets are calibrated for He
@@ -38,9 +44,11 @@
  */
 #include "thalmann.h"
 #include "deco.h"
+#include "dive.h"
 #include "pref.h"
 
 #include "deco/eldcm.h"
+#include "deco/profile.h"
 #include "params/vval_79.h"
 #include "params/xval_he_8_023.h"
 #include "params/xval_he_8_040.h"
@@ -49,6 +57,8 @@
 
 #include <array>
 #include <cmath>
+#include <cstdlib>
+#include <vector>
 
 /* U.S. Navy rounded conversion: 33 fsw = 1 atm = 1.01325 bar (TR 18-05 p.A-13). */
 static const double fsw_per_bar = 33.0 / 1.01325;
@@ -61,6 +71,16 @@ const char *thalmann_paramset_names[] = {
 	"XVal-He-9 4.0% (He-O2 CCR, TR 18-05)",
 };
 const int thalmann_paramset_count = 5;
+
+/* Precomputed holds, installed by thalmann_plan_stops() and read by
+ * thalmann_trial_ascent(). Same pattern as LEM's static allocation. */
+static struct {
+	bool valid = false;
+	std::vector<int> depth_mm;
+	std::vector<int> seconds;
+} thalmann_alloc;
+
+static constexpr int stop_match_mm = 200; /* ~0.65 ft */
 
 static const deco::ParameterSet &active_paramset()
 {
@@ -107,6 +127,9 @@ void thalmann_clear(struct deco_state *ds, double surface_pressure_bar)
 	for (size_t i = 0; i < compartment_count(p); i++)
 		ds->thalmann_tension_fsw[i] = initial;
 	ds->thalmann_surface_bar = surface_pressure_bar;
+	ds->thalmann_seg_mm = -1;
+	ds->thalmann_seg_seconds = 0;
+	thalmann_alloc = {};
 }
 
 void thalmann_add_segment(struct deco_state *ds, double pressure_bar, struct gasmix gasmix,
@@ -115,6 +138,13 @@ void thalmann_add_segment(struct deco_state *ds, double pressure_bar, struct gas
 	const deco::ParameterSet &base = active_paramset();
 	deco::ParameterSet p = leg_params(base, gasmix, ccpo2_mbar, divemode);
 	double depth_fsw = std::max((pressure_bar - ds->thalmann_surface_bar) * fsw_per_bar, 0.0);
+	int mm = (int)lrint(depth_fsw * 304.8);
+	if (ds->thalmann_seg_mm < 0 || std::abs(mm - ds->thalmann_seg_mm) > stop_match_mm) {
+		ds->thalmann_seg_mm = mm;
+		ds->thalmann_seg_seconds = 0;
+	}
+	ds->thalmann_seg_seconds += period_in_seconds;
+
 	deco::AmbientState amb = deco::resolve_ambient_state(p, depth_fsw);
 	double minutes = period_in_seconds / 60.0;
 
@@ -199,4 +229,73 @@ double thalmann_tolerated_ambient_pressure(struct deco_state *ds, double surface
 		}
 	}
 	return surface_pressure_bar + max_gauge_fsw / fsw_per_bar;
+}
+
+void thalmann_plan_stops(struct deco_state *ds, const struct dive *dive,
+			 depth_t bottom_depth, int ascent_mm_per_sec,
+			 struct gasmix bottom_mix, int bottom_ccpo2, enum divemode_t bottom_mode,
+			 const std::vector<thalmann_deco_leg> &switches)
+{
+	thalmann_alloc = {};
+	if (!ds || !dive)
+		return;
+
+	deco::ParameterSet p = active_paramset();
+	if (bottom_mode == CCR && bottom_ccpo2 > 0) {
+		p.constant_po2 = true;
+		p.po2_setpoint_atm = bottom_ccpo2 / 1013.25;
+	} else {
+		p.constant_po2 = false;
+		p.fn2 = 1.0 - get_o2(bottom_mix) / 1000.0;
+	}
+
+	deco::Profile legs;
+	for (const auto &sw : switches) {
+		deco::DiveSegment seg;
+		seg.depth_fsw = sw.depth.mm / 304.8;
+		if (sw.divemode == CCR && sw.ccpo2_mbar > 0)
+			seg.po2_setpoint = sw.ccpo2_mbar / 1013.25;
+		else
+			seg.gas = deco::GasMix{get_o2(sw.gasmix) / 1000.0, 0.0};
+		legs.push_back(seg);
+	}
+
+	const size_t n = compartment_count(p);
+	std::vector<deco::CompartmentState> state(n);
+	for (size_t i = 0; i < n; i++)
+		state[i].tension_fsw = ds->thalmann_tension_fsw[i];
+
+	// Nominal feet as fsw so 100 ft is 100 fsw on the Navy stop grid,
+	// not 100.3 fsw from 1.030 kg/L salinity.
+	double depth_fsw = bottom_depth.mm / 304.8;
+	double rate = ascent_mm_per_sec > 0 ? ascent_mm_per_sec * 60.0 / 304.8 : 30.0;
+
+	deco::Schedule s = deco::generate_ascent_schedule(p, std::move(state), depth_fsw, rate, legs);
+
+	thalmann_alloc.valid = true;
+	for (const auto &st : s.stops) {
+		thalmann_alloc.depth_mm.push_back((int)feet_to_mm(st.depth_fsw));
+		thalmann_alloc.seconds.push_back((int)lrint(st.hold_time_min * 60.0));
+	}
+}
+
+bool thalmann_trial_ascent(const struct deco_state *ds, int wait_time, depth_t trial_depth)
+{
+	if (!thalmann_alloc.valid)
+		return true;
+
+	int allocated = 0;
+	for (size_t i = 0; i < thalmann_alloc.depth_mm.size(); i++) {
+		if (std::abs(thalmann_alloc.depth_mm[i] - trial_depth.mm) <= stop_match_mm) {
+			allocated = thalmann_alloc.seconds[i];
+			break;
+		}
+	}
+	if (allocated <= 0)
+		return true;
+
+	int served = 0;
+	if (ds->thalmann_seg_mm >= 0 && std::abs(ds->thalmann_seg_mm - trial_depth.mm) <= stop_match_mm)
+		served = ds->thalmann_seg_seconds;
+	return served + wait_time >= allocated;
 }

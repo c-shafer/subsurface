@@ -11,6 +11,7 @@ private slots:
 	void testCcrHeO2();
 	void testCcrHeO2Deep();
 	void testOpenCircuitAir();
+	void testOpenCircuitAirO2();
 };
 
 #endif // TESTTHALMANN_H

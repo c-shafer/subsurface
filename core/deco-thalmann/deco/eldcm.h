@@ -900,6 +900,136 @@ inline double run_o2_air_cycling_hold(const ParameterSet& base_params,
     return reported_hold;
 }
 
+// Ascent half of generate_schedule(): from an already-loaded tissue
+// state at current_depth_fsw, walk to the surface. Callers that have
+// already simulated the descent and bottom (Subsurface's planner) use
+// this directly; generate_schedule() uses it after doing that work
+// itself. `state` is copied. `params_in` must still carry the regime's
+// table SDR values (not already CNDSDR-gated) so apply_gas_leg() can
+// restore the real table SDR on an enriched deco gas.
+inline Schedule generate_ascent_schedule(const ParameterSet& params_in,
+                                          std::vector<CompartmentState> state,
+                                          double current_depth_fsw,
+                                          double ascent_rate_fsw_per_min,
+                                          const Profile& deco_legs) {
+    if (ascent_rate_fsw_per_min <= 0.0)
+        ascent_rate_fsw_per_min = 30.0;
+    ParameterSet params = resolve_open_circuit_compartments(params_in);
+    const std::size_t n = params.compartments.size();
+    if (state.size() < n)
+        return Schedule{};
+    if (state.size() > n)
+        state.resize(n);
+
+    std::vector<DiveSegment> legs(deco_legs.begin(), deco_legs.end());
+    std::sort(legs.begin(), legs.end(),
+              [](const DiveSegment& a, const DiveSegment& b) { return a.depth_fsw > b.depth_fsw; });
+    std::size_t next_leg = 0;
+    auto apply_due_legs = [&](double depth_fsw) {
+        while (next_leg < legs.size() && depth_fsw <= legs[next_leg].depth_fsw + 1e-9) {
+            params = apply_gas_leg(params, legs[next_leg], params_in);
+            ++next_leg;
+        }
+    };
+
+    auto ramp_ascend = [&](double from_depth, double to_depth, const ParameterSet& gas_params) {
+        if (from_depth <= to_depth)
+            return;
+        AmbientState start_amb =
+            resolve_ambient_state(gas_params, from_depth, /*dc_fsw=*/to_depth - from_depth);
+        RampRates rates = resolve_ramp_rates(gas_params, -ascent_rate_fsw_per_min);
+        const double duration = (from_depth - to_depth) / ascent_rate_fsw_per_min;
+        for (std::size_t i = 0; i < n; ++i) {
+            advance_compartment_ramp(state[i], start_amb, rates.rinrt_fsw_per_min,
+                                      rates.ro2_fsw_per_min, gas_params.compartments[i], duration);
+        }
+    };
+
+    Schedule schedule;
+    const double dinc = params.stop_depth_increment_fsw;
+    O2AirCyclingState cyc;
+    cyc.strto2 = params.o2_cycling_enabled;
+
+    // generate_schedule() always starts on an exact DINC multiple (100, 90,
+    // …, 20). Callers that pass a pressure-derived depth (e.g. 100.3 fsw
+    // from 100 ft of 1.030 kg/L water) would otherwise step 100.3, 90.3,
+    // …, 20.3, 10.3 and miss last_stop_depth_fsw. Snap onto the 0-aligned
+    // grid; never snap shallower than the last stop while still deeper
+    // than it.
+    auto snap_stop = [&](double d) {
+        if (d <= 0.0 || dinc <= 0.0)
+            return 0.0;
+        double g = std::floor(d / dinc + 1e-9) * dinc;
+        if (g + 1e-9 < params.last_stop_depth_fsw && g > 0.0)
+            g = params.last_stop_depth_fsw;
+        return g;
+    };
+
+    for (int guard = 0; guard < 500 && current_depth_fsw > 0.0; ++guard) {
+        apply_due_legs(current_depth_fsw);
+
+        std::vector<double> tensions(n);
+        for (std::size_t i = 0; i < n; ++i) tensions[i] = state[i].tension_fsw;
+
+        const double entering_iad = find_ceiling_fsw(params, tensions, current_depth_fsw);
+        const double ceiling = snap_stop(find_first_stop_depth_fsw(
+            params, state, current_depth_fsw, entering_iad, ascent_rate_fsw_per_min));
+        if (ceiling < current_depth_fsw) {
+            ramp_ascend(current_depth_fsw, ceiling, params);
+            current_depth_fsw = ceiling;
+            apply_due_legs(current_depth_fsw);
+            for (std::size_t i = 0; i < n; ++i) tensions[i] = state[i].tension_fsw;
+        }
+        if (current_depth_fsw <= 0.0) break;
+
+        AmbientState amb = resolve_ambient_state(params, current_depth_fsw);
+        std::vector<double> targets(n);
+        for (std::size_t i = 0; i < n; ++i) targets[i] = mptt_value(params, i, current_depth_fsw);
+
+        const double grid_depth = snap_stop(current_depth_fsw);
+        const double next_depth = (grid_depth <= params.last_stop_depth_fsw + 1e-9)
+                                       ? 0.0
+                                       : std::max(grid_depth - dinc, 0.0);
+
+        double hold_time;
+        if (params.o2_cycling_enabled && current_depth_fsw <= params.o2ceil_fsw + 1e-9) {
+            hold_time = run_o2_air_cycling_hold(params, state, cyc, current_depth_fsw, next_depth,
+                                                 ascent_rate_fsw_per_min, params_in);
+        } else {
+            hold_time = required_stop_time_all(params, tensions, amb, targets);
+            if (!std::isfinite(hold_time))
+                break;
+            hold_time = optimize_stop_time(params, state, current_depth_fsw, next_depth, targets,
+                                            hold_time, ascent_rate_fsw_per_min);
+            if (params.round_stop_time_up && hold_time > 0.0)
+                hold_time = std::ceil(hold_time - 1e-9);
+            if (hold_time > 0.0) {
+                for (std::size_t i = 0; i < n; ++i)
+                    advance_compartment(state[i], amb, params.compartments[i], hold_time);
+            }
+        }
+        if (hold_time > 0.0) {
+            schedule.stops.push_back({current_depth_fsw, hold_time});
+            schedule.total_stop_time_min += hold_time;
+        }
+
+        if (params.o2_cycling_enabled && cyc.o2strtd) {
+            DiveSegment cycle_leg;
+            cycle_leg.depth_fsw = current_depth_fsw;
+            const double cycle_fn2 = cyc.ono2 ? (1.0 - params.o2time_fo2) : params.fn2;
+            cycle_leg.gas = GasMix{1.0 - cycle_fn2, 0.0};
+            const ParameterSet cycle_params = apply_gas_leg(params, cycle_leg, params_in);
+            ramp_ascend(current_depth_fsw, next_depth, cycle_params);
+            cyc.rtime -= (current_depth_fsw - next_depth) / ascent_rate_fsw_per_min;
+        } else {
+            ramp_ascend(current_depth_fsw, next_depth, params);
+        }
+        current_depth_fsw = next_depth;
+    }
+
+    return schedule;
+}
+
 // Generates a greedy decompression schedule: descend to max_depth_fsw
 // (ramping at descent_rate_fsw_per_min), hold at max_depth_fsw for the
 // remainder of bottom_time_min (see the bottom-hold note below), then
@@ -963,42 +1093,13 @@ inline double run_o2_air_cycling_hold(const ParameterSet& base_params,
 inline Schedule generate_schedule(const ParameterSet& params_in, double max_depth_fsw,
                                    double bottom_time_min, double descent_rate_fsw_per_min,
                                    double ascent_rate_fsw_per_min, const Profile& deco_legs) {
-    // Resolve the CNDSDR_FO2 gate once up front for the bottom/descent
-    // gas — see resolve_open_circuit_compartments()'s header comment.
-    // `params` is mutable: apply_gas_leg() reassigns it wholesale when a
-    // deco_legs trigger is reached during ascent, and every use below
-    // (including inside ascendr()/required_stop_time_all()/
-    // optimize_stop_time(), which all read params.compartments directly,
-    // and the ramp_ascend lambda, which captures params by reference)
-    // sees the currently-active leg's resolved compartments as a result.
     ParameterSet params = resolve_open_circuit_compartments(params_in);
     const std::size_t n = params.compartments.size();
     std::vector<CompartmentState> state(n);
 
-    // Deco legs sorted deepest-trigger-first, so a simple advancing
-    // index correctly applies them in the order an ascent reaches them
-    // regardless of the order the caller passed them in.
-    std::vector<DiveSegment> legs(deco_legs.begin(), deco_legs.end());
-    std::sort(legs.begin(), legs.end(),
-              [](const DiveSegment& a, const DiveSegment& b) { return a.depth_fsw > b.depth_fsw; });
-    std::size_t next_leg = 0;
-    auto apply_due_legs = [&](double depth_fsw) {
-        while (next_leg < legs.size() && depth_fsw <= legs[next_leg].depth_fsw + 1e-9) {
-            params = apply_gas_leg(params, legs[next_leg], params_in);
-            ++next_leg;
-        }
-    };
-
     // Initial tissue loading: saturated on AIR at the surface, computed
     // through the model's own arterial-tension formula — see
-    // air_saturation_tension_fsw() and TR 10-09 Appendix B p.B-1. This
-    // is ~PACO2 below the earlier round-5 approximation
-    // (0.79*surface_pressure_fsw), the difference being the arterial
-    // CO2/H2O/AMBAO2 offset the tissue actually equilibrates against;
-    // for XVal-He-8_040 that is 24.57 vs 26.07 fsw. The excess decays
-    // with each compartment's own half-time and is what previously left
-    // the slow (200-min) compartment ~1.5 fsw over-loaded at the stop
-    // where it becomes binding — see DEVLOG.md's Table 14 round 7 entry.
+    // air_saturation_tension_fsw() and TR 10-09 Appendix B p.B-1.
     {
         const double initial_tension_fsw = air_saturation_tension_fsw(params);
         for (auto& s : state) s.tension_fsw = initial_tension_fsw;
@@ -1018,14 +1119,8 @@ inline Schedule generate_schedule(const ParameterSet& params_in, double max_dept
 
     // Bottom hold. bottom_time_min is the diver-facing "Bottom Time" —
     // total elapsed time from leaving the surface to leaving the bottom
-    // (US Navy Diving Manual Rev 7 §9-3.2, and Chapter 15's restatement
-    // for 1.3 ata ppO2 He-O2 EC-UBA diving specifically: "the bottom
-    // time (time from leaving the surface to leaving the bottom)") —
-    // not a pure isobaric-hold duration on top of descent. The actual
-    // hold at max_depth_fsw is therefore bottom_time_min minus the
-    // descent time already spent getting there, floored at 0 (a
-    // bottom_time_min shorter than the descent itself means the diver
-    // never reaches a steady hold before beginning ascent).
+    // (US Navy Diving Manual Rev 7 §9-3.2). The actual hold at
+    // max_depth_fsw is therefore bottom_time_min minus the descent time.
     const double hold_duration_min = std::max(bottom_time_min - descent_duration_min, 0.0);
     {
         AmbientState amb = resolve_ambient_state(params, max_depth_fsw);
@@ -1034,142 +1129,8 @@ inline Schedule generate_schedule(const ParameterSet& params_in, double max_dept
         }
     }
 
-    auto ramp_ascend = [&](double from_depth, double to_depth, const ParameterSet& gas_params) {
-        AmbientState start_amb =
-            resolve_ambient_state(gas_params, from_depth, /*dc_fsw=*/to_depth - from_depth);
-        RampRates rates = resolve_ramp_rates(gas_params, -ascent_rate_fsw_per_min);
-        const double duration = (from_depth - to_depth) / ascent_rate_fsw_per_min;
-        for (std::size_t i = 0; i < n; ++i) {
-            advance_compartment_ramp(state[i], start_amb, rates.rinrt_fsw_per_min,
-                                      rates.ro2_fsw_per_min, gas_params.compartments[i], duration);
-        }
-    };
-
-    Schedule schedule;
-    double current_depth = max_depth_fsw;
-    const double dinc = params.stop_depth_increment_fsw;
-
-    // TR 10-09 Figure 13 ("O2-Air Cycling") state, persisting across
-    // every stop of the ascent — see run_o2_air_cycling_hold(). strto2
-    // (O2 decompression "armed") mirrors params.o2_cycling_enabled,
-    // this library's stand-in for the OD/IW PCF option; the rest of
-    // O2AirCyclingState's defaults are already the correct starting
-    // state (not yet triggered, not yet on O2).
-    O2AirCyclingState cyc;
-    cyc.strto2 = params.o2_cycling_enabled;
-
-    // Bounded defensive guard, not an expected iteration count for any
-    // realistic profile — see compartment.h's Regime loop for the same
-    // pattern/rationale.
-    for (int guard = 0; guard < 500 && current_depth > 0.0; ++guard) {
-        // Apply any deco-gas-leg switch whose trigger depth has been
-        // reached — covers both the state at loop entry (including the
-        // first iteration, if a leg triggers at or above max_depth_fsw)
-        // and after the previous iteration's ascent to next_depth.
-        apply_due_legs(current_depth);
-
-        std::vector<double> tensions(n);
-        for (std::size_t i = 0; i < n; ++i) tensions[i] = state[i].tension_fsw;
-
-        // TR 10-09 Figure 37 ("Update IAD") gives the entering estimate;
-        // Figure 11 (FRSP7) refines it with real gas-exchange credit
-        // during the candidate ascent itself — see find_first_stop_depth_fsw()'s
-        // header comment. Applied at every iteration, not just the first
-        // ascent from bottom: FRSP7's role in TBLP7R's overall loop is to
-        // find the next required stop depth generally, not a one-time
-        // start-of-dive computation.
-        const double entering_iad = find_ceiling_fsw(params, tensions, current_depth);
-        const double ceiling = find_first_stop_depth_fsw(
-            params, state, current_depth, entering_iad, ascent_rate_fsw_per_min);
-        if (ceiling < current_depth) {
-            ramp_ascend(current_depth, ceiling, params);
-            current_depth = ceiling;
-            apply_due_legs(current_depth);
-            for (std::size_t i = 0; i < n; ++i) tensions[i] = state[i].tension_fsw;
-        }
-        if (current_depth <= 0.0) break;
-
-        AmbientState amb = resolve_ambient_state(params, current_depth);
-        std::vector<double> targets(n);
-        for (std::size_t i = 0; i < n; ++i) targets[i] = mptt_value(params, i, current_depth);
-
-        // Per the SetM convention (see mptt_value()'s header comment),
-        // ascending from last_stop_depth_fsw always targets the
-        // surface directly, not last_stop-DINC.
-        const double next_depth = (current_depth <= params.last_stop_depth_fsw + 1e-9)
-                                       ? 0.0
-                                       : std::max(current_depth - dinc, 0.0);
-
-        double hold_time;
-        if (params.o2_cycling_enabled && current_depth <= params.o2ceil_fsw + 1e-9) {
-            // TR 10-09 Figure 13: run_o2_air_cycling_hold() owns the
-            // full sub-loop (gas selection, STIM7-equivalent
-            // computation, Figure 29 washout optimization, and RNDUPD
-            // rounding for the final sub-period) and advances `state`
-            // itself — unlike the single-gas path below, there is no
-            // separate advance_compartment() call afterward.
-            hold_time = run_o2_air_cycling_hold(params, state, cyc, current_depth, next_depth,
-                                                 ascent_rate_fsw_per_min, params_in);
-        } else {
-            hold_time = required_stop_time_all(params, tensions, amb, targets);
-            if (!std::isfinite(hold_time)) {
-                // No finite hold satisfies every compartment's constraint
-                // (shouldn't happen for a well-formed table/profile) —
-                // stop rather than loop or fabricate a schedule.
-                break;
-            }
-            // TR 10-09 Figure 29: shorten the hold using the washout that
-            // happens during the real (ramping) ascent to next_depth,
-            // rather than assuming next_depth is reached instantaneously.
-            hold_time = optimize_stop_time(params, state, current_depth, next_depth, targets,
-                                            hold_time, ascent_rate_fsw_per_min);
-            // TR 10-09 Figure 16 ("Round Time Up"), gated on RNDUPD: round
-            // the hold up to the next whole minute and advance the tissues
-            // with that rounded value (the -1e-9 keeps an already-integer
-            // time from stepping to the next minute on floating-point
-            // fuzz). See ParameterSet::round_stop_time_up.
-            if (params.round_stop_time_up && hold_time > 0.0) {
-                hold_time = std::ceil(hold_time - 1e-9);
-            }
-            if (hold_time > 0.0) {
-                for (std::size_t i = 0; i < n; ++i) {
-                    advance_compartment(state[i], amb, params.compartments[i], hold_time);
-                }
-            }
-        }
-        if (hold_time > 0.0) {
-            schedule.stops.push_back({current_depth, hold_time});
-            schedule.total_stop_time_min += hold_time;
-        }
-
-        if (params.o2_cycling_enabled && cyc.o2strtd) {
-            // TR 10-09 Figure 9: once O2-Air Cycling has started, travel
-            // between stops is breathed on the prevailing cycle gas (O2
-            // mid-period, air mid-break), not the bottom/travel gas, and
-            // RTIME is decremented by the travel time ("Update RTIME:
-            // RTIME = RTIME - TC" on the travel path). This also keeps the
-            // real ascent consistent with the washout gas
-            // optimize_stop_time() already assumed when it trimmed the
-            // final sub-period inside run_o2_air_cycling_hold(). Not
-            // modeled (sub-travel-time effect, ~1/3 min for a 10 fsw
-            // increment): Figure 9's mid-travel period-expiry split
-            // ("DEPTH = RATE*RTIME + CDEPTH" when TC > RTIME) — a period
-            // expiring mid-travel switches gas at the period boundary in
-            // the source; here the switch lands at the next stop instead.
-            DiveSegment cycle_leg;
-            cycle_leg.depth_fsw = current_depth;
-            const double cycle_fn2 = cyc.ono2 ? (1.0 - params.o2time_fo2) : params.fn2;
-            cycle_leg.gas = GasMix{1.0 - cycle_fn2, 0.0};
-            const ParameterSet cycle_params = apply_gas_leg(params, cycle_leg, params_in);
-            ramp_ascend(current_depth, next_depth, cycle_params);
-            cyc.rtime -= (current_depth - next_depth) / ascent_rate_fsw_per_min;
-        } else {
-            ramp_ascend(current_depth, next_depth, params);
-        }
-        current_depth = next_depth;
-    }
-
-    return schedule;
+    return generate_ascent_schedule(params_in, std::move(state), max_depth_fsw,
+                                    ascent_rate_fsw_per_min, deco_legs);
 }
 
 // Convenience overload: single fixed gas mode for the entire dive, no

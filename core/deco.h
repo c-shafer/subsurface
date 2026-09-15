@@ -50,6 +50,11 @@ struct deco_state {
 	// gas tension per compartment, in fsw; see core/thalmann.cpp.
 	double thalmann_tension_fsw[16] = {};
 	double thalmann_surface_bar = 1.01325;
+	// Time actually spent at the current depth during the walk, so
+	// thalmann_trial_ascent() can see how much of the precomputed hold
+	// has been served. Rewound with the rest of deco_state on CVA.
+	int thalmann_seg_mm = -1;
+	int thalmann_seg_seconds = 0;
 
 	// AI-generated (Claude)
 	// LEM state (deco mode LEM). The probabilistic model has no tissue
