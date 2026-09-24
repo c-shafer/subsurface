@@ -11,8 +11,11 @@
 #include "core/dive.h"
 #include "core/divecomputer.h"
 #include "core/lemscore.h"
+#include "core/divelist.h"
 #include "core/sample.h"
 #include "core/units.h"
+
+#include <memory>
 
 #include "deco/lem.h"
 #include "params/lem_he8n25.h"
@@ -200,6 +203,49 @@ void TestLemScore::testHeO2DecoReducesRisk()
 
 	QVERIFY(stopped.pdcs_he8n25 < direct.pdcs_he8n25);
 	QVERIFY(stopped.pdcs_hen2_2016 < direct.pdcs_hen2_2016);
+}
+
+void TestLemScore::testRepetitiveIncreasesRisk()
+{
+	auto make_square = [](timestamp_t when) {
+		std::unique_ptr<dive> d(new dive);
+		d->when = when;
+		d->salinity = 10300;
+		d->surface_pressure = 1_atm;
+		cylinder_t *cyl = d->get_or_create_cylinder(0);
+		cyl->gasmix = { 21_percent, 0_percent };
+		struct divecomputer &dc = d->dcs[0];
+		dc.divemode = OC;
+		addSample(dc, 0, 0);
+		addSample(dc, 2 * 60, feet_to_mm(60));
+		addSample(dc, 30 * 60, feet_to_mm(60));
+		addSample(dc, 32 * 60, 0);
+		d->duration.seconds = 32 * 60;
+		d->maxdepth.mm = feet_to_mm(60);
+		return d;
+	};
+
+	timestamp_t t0 = 1'700'000'000;
+	auto first = make_square(t0);
+	auto second = make_square(t0 + 32 * 60 + 60 * 60);
+
+	dive_table empty;
+	lem_pdcs_result iso = calculate_lem_pdcs(*second, 0, &empty);
+	QVERIFY(iso.valid);
+	QCOMPARE(iso.n_prior_dives, 0);
+
+	dive_table table;
+	table.put(std::move(first));
+	lem_pdcs_result rep = calculate_lem_pdcs(*second, 0, &table);
+	QVERIFY(rep.valid);
+	QCOMPARE(rep.n_prior_dives, 1);
+	QVERIFY(rep.pdcs_he8n25 > iso.pdcs_he8n25);
+	QVERIFY(rep.pdcs_hen2_2016 > iso.pdcs_hen2_2016);
+
+	auto late = make_square(t0 + 32 * 60 + 49 * 3600);
+	lem_pdcs_result gap = calculate_lem_pdcs(*late, 0, &table);
+	QVERIFY(gap.valid);
+	QCOMPARE(gap.n_prior_dives, 0);
 }
 
 QTEST_GUILESS_MAIN(TestLemScore)

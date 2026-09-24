@@ -12,6 +12,7 @@ private slots:
 	void testDecoReducesRisk();
 	void testCcrSetpoint();
 	void testHeO2DecoReducesRisk();
+	void testRepetitiveIncreasesRisk();
 };
 
 #endif // TESTLEMSCORE_H
