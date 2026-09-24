@@ -81,9 +81,9 @@
  *   report the achieved figure, which is computed from the emitted plan.
  * - The ceiling drawn on the planner's profile is Buehlmann's, since LEM has
  *   no ceiling; only the stop schedule is LEM-derived. The plan notes say so.
- * - Tissue loading inherited from a previous dive (init_decompression) is not
- *   represented: the LEM profile starts at surface equilibrium at the start of
- *   the planned dive, the same isolation lemscore.cpp documents for scoring.
+ * - Stop allocation does not inherit tissue from a previous dive. The notes
+ *   pDCS (lemscore) does: preceding dives in the 48 h / same-trip window
+ *   are chained with air surface intervals.
  * - Layer A only (dissolved-gas hazard core), as vendored; see lem.h.
  */
 #include "lemplanner.h"

@@ -7,6 +7,7 @@
 #include "units.h"
 #include <memory>
 #include <optional>
+#include <vector>
 
 struct dive;
 struct divelog;
@@ -34,6 +35,9 @@ struct dive_table : public sorted_owning_table<dive, &comp_dives> {
 	void fixup_dive(struct dive &dive) const;
 	void force_fixup_dive(struct dive &d) const;
 	int init_decompression(struct deco_state *ds, const struct dive *dive, bool in_planner) const;
+	/* Same lookback as init_decompression: same trip, no 48 h gap.
+	 * Chronological, not including `dive`. */
+	std::vector<const struct dive *> preceding_repetitive_dives(const struct dive *dive) const;
 	void update_cylinder_related_info(struct dive &dive) const;
 	int get_dive_nr_at_idx(int idx) const;
 	timestamp_t get_surface_interval(timestamp_t when) const;

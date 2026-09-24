@@ -14,16 +14,21 @@
  * relative to the dive's own surface pressure, so altitude and salinity
  * are folded in the same way as the Thalmann planner backend.
  *
- * The scorer itself appends a 24 h post-dive surface interval (risk is
- * dominated by the surface phase); repetitive-dive interaction is NOT
- * modeled - each dive is scored in isolation from air saturation. */
+ * A 24 h air surface tail is appended after the last dive (risk is
+ * dominated by the surface phase). Preceding dives in the same 48 h /
+ * same-trip window as init_decompression() are chained with air surface
+ * intervals so residual inert gas is not reset between dives. */
 #include "lemscore.h"
 #include "dive.h"
 #include "divecomputer.h"
+#include "divelist.h"
+#include "divelog.h"
 #include "event.h"
 #include "gas.h"
 #include "range.h"
 #include "sample.h"
+
+#include <cmath>
 
 #include "deco/lem.h"
 #include "params/lem_he8n25.h"
@@ -61,31 +66,101 @@ static deco::LemProfile build_lem_profile(const struct dive &dive, const struct 
 	return profile;
 }
 
-lem_pdcs_result calculate_lem_pdcs(const struct dive &dive, int dcNr)
+static const struct divecomputer *lem_dc_or_fake(const struct dive &d, int dcNr, struct divecomputer &faked)
+{
+	const struct divecomputer *dc = d.get_dc(dcNr);
+	if (!dc)
+		dc = d.get_dc(0);
+	if (!dc)
+		return nullptr;
+	if (dc->samples.size() >= 2)
+		return dc;
+	if (!d.duration.seconds || !d.maxdepth.mm)
+		return nullptr;
+	faked = *dc;
+	if (!faked.maxdepth.mm)
+		faked.maxdepth = d.maxdepth;
+	if (!faked.duration.seconds)
+		faked.duration = d.duration;
+	fake_dc(&faked);
+	return faked.samples.size() >= 2 ? &faked : nullptr;
+}
+
+static void lem_to_surface_air(deco::LemProfile &p)
+{
+	if (p.empty())
+		return;
+	deco::GasMix air{ 0.21, 0.0 };
+	auto air_oc = [](const deco::LemNode &n) {
+		return !n.po2_setpoint && n.gas.fhe < 0.01 && std::fabs(n.gas.fo2 - 0.21) < 0.02;
+	};
+	if (p.back().depth_fsw > 0.05) {
+		deco::LemNode s;
+		s.time_min = p.back().time_min + p.back().depth_fsw / 30.0;
+		s.depth_fsw = 0.0;
+		s.gas = air;
+		p.push_back(s);
+	} else if (!air_oc(p.back())) {
+		deco::LemNode s;
+		s.time_min = p.back().time_min + 1e-6;
+		s.depth_fsw = 0.0;
+		s.gas = air;
+		p.push_back(s);
+	}
+}
+
+static deco::LemProfile build_chained_lem_profile(const struct dive &dive, int dcNr,
+						  const struct dive_table &table, int *n_prior)
+{
+	std::vector<const struct dive *> seq = table.preceding_repetitive_dives(&dive);
+	if (n_prior)
+		*n_prior = static_cast<int>(seq.size());
+	seq.push_back(&dive);
+
+	deco::LemProfile out;
+	timestamp_t origin = seq.front()->when;
+	for (size_t i = 0; i < seq.size(); i++) {
+		const struct dive *d = seq[i];
+		struct divecomputer faked;
+		int use_dc = (d == &dive) ? dcNr : 0;
+		const struct divecomputer *dc = lem_dc_or_fake(*d, use_dc, faked);
+		if (!dc)
+			continue;
+		deco::LemProfile chunk = build_lem_profile(*d, *dc);
+		if (chunk.size() < 2)
+			continue;
+		double t0 = (d->when - origin) / 60.0;
+		if (t0 < 0.0)
+			t0 = 0.0;
+		for (auto &n: chunk)
+			n.time_min += t0;
+		if (!out.empty() && chunk.front().time_min + 1e-9 < out.back().time_min) {
+			double shift = out.back().time_min - chunk.front().time_min;
+			for (auto &n: chunk)
+				n.time_min += shift;
+		}
+		if (!out.empty()) {
+			lem_to_surface_air(out);
+			double gap = chunk.front().time_min - out.back().time_min;
+			if (gap > 1e-9) {
+				deco::LemNode air;
+				air.time_min = chunk.front().time_min;
+				air.depth_fsw = 0.0;
+				air.gas = deco::GasMix{ 0.21, 0.0 };
+				out.push_back(air);
+			}
+		}
+		for (auto &n: chunk)
+			out.push_back(n);
+	}
+	return out;
+}
+
+lem_pdcs_result calculate_lem_pdcs(const struct dive &dive, int dcNr, const struct dive_table *table)
 {
 	lem_pdcs_result result;
-	const struct divecomputer *dc = dive.get_dc(dcNr);
-	if (!dc)
-		return result;
-
-	// Manually entered dives without samples: score the synthesized
-	// (faked) profile, same as the profile display does.
-	struct divecomputer faked;
-	if (dc->samples.size() < 2) {
-		if (!dive.duration.seconds || !dive.maxdepth.mm)
-			return result;
-		faked = *dc;
-		if (!faked.maxdepth.mm)
-			faked.maxdepth = dive.maxdepth;
-		if (!faked.duration.seconds)
-			faked.duration = dive.duration;
-		fake_dc(&faked);
-		dc = &faked;
-		if (dc->samples.size() < 2)
-			return result;
-	}
-
-	deco::LemProfile profile = build_lem_profile(dive, *dc);
+	const struct dive_table &tab = table ? *table : divelog.dives;
+	deco::LemProfile profile = build_chained_lem_profile(dive, dcNr, tab, &result.n_prior_dives);
 	if (profile.size() < 2)
 		return result;
 

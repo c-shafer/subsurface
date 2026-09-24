@@ -16,8 +16,12 @@ struct lem_pdcs_result {
 	bool valid = false;
 	double pdcs_he8n25 = 0.0;
 	double pdcs_hen2_2016 = 0.0;
+	int n_prior_dives = 0;
 };
 
-extern lem_pdcs_result calculate_lem_pdcs(const struct dive &dive, int dcNr);
+struct dive_table;
+
+extern lem_pdcs_result calculate_lem_pdcs(const struct dive &dive, int dcNr,
+					  const struct dive_table *table = nullptr);
 
 #endif // LEMSCORE_H

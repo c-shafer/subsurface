@@ -850,6 +850,54 @@ bool dive_or_trip_less_than(struct dive_or_trip a, struct dive_or_trip b)
  * that happened inside other dives. The interval will always be calculated
  * with respect to the dive that started previously.
  */
+std::vector<const struct dive *> dive_table::preceding_repetitive_dives(const struct dive *dive) const
+{
+	std::vector<const struct dive *> out;
+	if (!dive)
+		return out;
+
+	int nr_dives = static_cast<int>(size());
+	size_t divenr = get_idx(dive);
+	int i = divenr != std::string::npos ? static_cast<int>(divenr) : nr_dives;
+	while (i + 1 < nr_dives) {
+		if ((*this)[i]->when > dive->when)
+			break;
+		i++;
+	}
+	while (i > 0) {
+		if ((*this)[i - 1]->when < dive->when)
+			break;
+		i--;
+	}
+
+	timestamp_t last_starttime = dive->when;
+	int start = i;
+	while (start--) {
+		if (static_cast<size_t>(start) == divenr && start > 0)
+			start--;
+		if (start < 0)
+			break;
+		const struct dive &pdive = *(*this)[start];
+		if (dive->divetrip && pdive.divetrip != dive->divetrip)
+			continue;
+		if (pdive.when >= dive->when || pdive.endtime() + 48 * 60 * 60 < last_starttime)
+			break;
+		last_starttime = pdive.when;
+	}
+
+	while (++start < nr_dives) {
+		const struct dive &pdive = *(*this)[start];
+		if (dive->divetrip && dive->divetrip != pdive.divetrip)
+			continue;
+		if (pdive.when >= dive->when)
+			break;
+		if (static_cast<size_t>(start) == divenr)
+			continue;
+		out.push_back(&pdive);
+	}
+	return out;
+}
+
 timestamp_t dive_table::get_surface_interval(timestamp_t when) const
 {
 	/* find previous dive. might want to use a binary search. */

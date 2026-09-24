@@ -74,6 +74,8 @@ set(SUBSURFACE_CORE_LIB_SRCS
 	lemplanner.h
 	lemscore.cpp
 	lemscore.h
+	bvm3.cpp
+	bvm3.h
 	device.cpp
 	device.h
 	devicedetails.cpp
