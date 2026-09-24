@@ -16,6 +16,7 @@
 #include "core/string-format.h"
 #include "core/divelist.h"
 #include "core/lemscore.h"
+#include "core/bvm3.h"
 
 #include <QSignalBlocker>
 
@@ -128,12 +129,18 @@ void TabDiveInformation::updateProfile()
 	ui->otuText->setText(QString("%L1").arg(currentDive->otu));
 	// AI-generated (Claude)
 	lem_pdcs_result pdcs = calculate_lem_pdcs(*currentDive, parent.currentDC);
-	if (pdcs.valid)
-		ui->pdcsText->setText(QString("he8n25: %1%\nHeN2_2016: %2%")
-			.arg(pdcs.pdcs_he8n25 * 100.0, 0, 'f', 2)
-			.arg(pdcs.pdcs_hen2_2016 * 100.0, 0, 'f', 2));
-	else
+	bvm3_result bvm3 = calculate_bvm3_pdcs(*currentDive, parent.currentDC);
+	QStringList pdcs_lines;
+	if (pdcs.valid) {
+		pdcs_lines << QString("LEM he8n25: %1%").arg(pdcs.pdcs_he8n25 * 100.0, 0, 'f', 2);
+		pdcs_lines << QString("LEM HeN2_2016: %1%").arg(pdcs.pdcs_hen2_2016 * 100.0, 0, 'f', 2);
+	}
+	if (bvm3.valid)
+		pdcs_lines << QString("BVM(3): %1%").arg(bvm3.pdcs * 100.0, 0, 'f', 2);
+	if (pdcs_lines.isEmpty())
 		ui->pdcsText->clear();
+	else
+		ui->pdcsText->setText(pdcs_lines.join('\n'));
 	ui->maximumDepthText->setText(get_depth_string(currentDive->maxdepth, true));
 	ui->averageDepthText->setText(get_depth_string(currentDive->meandepth, true));
 

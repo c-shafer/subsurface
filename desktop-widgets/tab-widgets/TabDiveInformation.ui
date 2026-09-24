@@ -364,10 +364,10 @@
        <item row="3" column="5">
         <widget class="QGroupBox" name="groupBox_pdcs">
          <property name="title">
-          <string>pDCS (USN LEM)</string>
+          <string>pDCS</string>
          </property>
          <property name="toolTip">
-          <string>Probability of decompression sickness under the U.S. Navy probabilistic LEM model (NEDU TR 02-10), scored with the LEM-he8n25 and LEM-HeN2_2016 calibrations. Dissolved-gas hazard core; each dive scored in isolation including 24h post-dive surface interval.</string>
+          <string>Probability of decompression sickness for this profile. LEM (NEDU TR 02-10 he8n25 and HeN2_2016) and BVM(3) (Gerth &amp; Vann 1997). Preceding dives in the same 48 h / same-trip window are included, then a 24 h air surface interval.</string>
          </property>
          <property name="alignment">
           <set>Qt::AlignHCenter</set>
