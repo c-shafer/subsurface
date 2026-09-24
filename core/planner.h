@@ -50,7 +50,24 @@ struct diveplan {
 	short vpmb_conservatism = 0;
 	std::vector<divedatapoint> dp;
 	int eff_gflow = 0, eff_gfhigh = 0;
+	double surface_gf = 0.0; /* Bühlmann leading-tissue GF at surfacing, percent */
 	int surface_interval = 0;
+
+	/* VVal-79 / Thalmann: Rev 7 §9-10 exceptional exposure, per deco mode. */
+	enum navy_ee_reason {
+		NAVY_EE_NONE = 0,
+		NAVY_EE_DEPTH,
+		NAVY_EE_AIR_TDT,
+		NAVY_EE_AIR_O2_TDT,
+	};
+	struct navy_ee_info {
+		bool applicable = false;
+		bool exceptional = false;
+		bool air_o2 = false;
+		navy_ee_reason reason = NAVY_EE_NONE;
+		int tdt_seconds = 0;
+		double max_depth_fsw = 0.0;
+	} navy_ee;
 
 	bool is_empty() const;
 	void add_plan_to_notes(struct dive &dive, bool show_disclaimer, planner_error_t error);

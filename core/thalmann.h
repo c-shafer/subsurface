@@ -31,16 +31,16 @@ struct thalmann_deco_leg {
 	enum divemode_t divemode = OC;
 };
 
-/* Choose stop times with libdeco's generate_ascent_schedule() from the
- * tissues already loaded through the bottom, then install them for the
- * walker. Call once per plan, after tissue_at_end, before the ascent. */
-extern void thalmann_plan_stops(struct deco_state *ds, const struct dive *dive,
-				depth_t bottom_depth, int ascent_mm_per_sec,
-				struct gasmix bottom_mix, int bottom_ccpo2, enum divemode_t bottom_mode,
-				const std::vector<thalmann_deco_leg> &switches);
+/* Navy hold at `depth` so a ramp to `next_depth` is clear: required_stop_time
+ * + Fig 29 optimize_stop_time + RNDUPD. 0 means leave now. Does not advance
+ * tissues; the planner's add_segment() does that. */
+extern int thalmann_hold_seconds_for_next_stop(const struct deco_state *ds, depth_t depth,
+					       depth_t next_depth, struct gasmix mix, int ccpo2_mbar,
+					       enum divemode_t divemode, int ascent_mm_per_sec);
 
-/* True when the diver has served the precomputed hold at trial_depth
- * (counting wait_time more seconds there), so the walker may ascend. */
-extern bool thalmann_trial_ascent(const struct deco_state *ds, int wait_time, depth_t trial_depth);
+/* True when the Navy hold to reach next_depth is already 0. */
+extern bool thalmann_trial_ascent(const struct deco_state *ds, depth_t depth, depth_t next_depth,
+				 struct gasmix mix, int ccpo2_mbar, enum divemode_t divemode,
+				 int ascent_mm_per_sec);
 
 #endif // THALMANN_H

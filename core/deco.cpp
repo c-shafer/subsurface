@@ -614,6 +614,28 @@ double get_gf(struct deco_state *ds, double ambpressure_bar, const struct dive *
 	return gf;
 }
 
+double buehlmann_surface_gf(const struct deco_state *ds, double surface_pressure_bar)
+{
+	double leading = 0.0;
+	for (int ci = 0; ci < 16; ci++) {
+		double sat = ds->tissue_n2_sat[ci] + ds->tissue_he_sat[ci];
+		if (sat <= 0.0)
+			continue;
+		double a = ((buehlmann_N2_a[ci] * ds->tissue_n2_sat[ci]) + (buehlmann_He_a[ci] * ds->tissue_he_sat[ci])) / sat;
+		double b = ((buehlmann_N2_b[ci] * ds->tissue_n2_sat[ci]) + (buehlmann_He_b[ci] * ds->tissue_he_sat[ci])) / sat;
+		if (b <= 0.0)
+			continue;
+		double surface_m_value = a + surface_pressure_bar / b;
+		double denom = surface_m_value - surface_pressure_bar;
+		if (denom <= 0.0)
+			continue;
+		double gf = 100.0 * (sat - surface_pressure_bar) / denom;
+		if (gf > leading)
+			leading = gf;
+	}
+	return leading;
+}
+
 double regressiona(const struct deco_state *ds)
 {
 	if (ds->sum1 > 1) {

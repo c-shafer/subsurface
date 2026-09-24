@@ -8,10 +8,10 @@
  * deco-engine contract: clear_deco() initializes tissue state,
  * add_segment() advances it at a given ambient pressure and gas, and
  * tissue_tolerance_calc() returns the tolerated ambient pressure from
- * which deco_allowed_depth() derives the ceiling. Stop *times* for the
- * planner are taken from libdeco's generate_ascent_schedule() (same
- * walker mixed_gas_example uses) and served by planner.cpp the way LEM
- * stop times are; the Bühlmann 60 s trial-ascent search is not used.
+ * which deco_allowed_depth() derives the ceiling. Stop *times* are
+ * computed live at each stoplevel from current EL-DCM tensions
+ * (required_stop_time + Fig 29 + RNDUPD), the TR 10-09 / NDC shape,
+ * not a one-shot table played back by wait_until().
  * Consequences of that split, all deliberate:
  *
  * - Stop depths follow the regime's 10 fsw grid and last-stop depth
@@ -72,15 +72,12 @@ const char *thalmann_paramset_names[] = {
 };
 const int thalmann_paramset_count = 5;
 
-/* Precomputed holds, installed by thalmann_plan_stops() and read by
- * thalmann_trial_ascent(). Same pattern as LEM's static allocation. */
-static struct {
-	bool valid = false;
-	std::vector<int> depth_mm;
-	std::vector<int> seconds;
-} thalmann_alloc;
-
 static constexpr int stop_match_mm = 200; /* ~0.65 ft */
+
+/* Fig 13 cycling clock, if a regime has o2_cycling_enabled. Reset in
+ * thalmann_clear(). Subsurface param sets leave cycling off (gas-list
+ * switches instead); this still keeps AIR/O2 cycling plans correct. */
+static deco::O2AirCyclingState thalmann_cyc;
 
 static const deco::ParameterSet &active_paramset()
 {
@@ -129,7 +126,7 @@ void thalmann_clear(struct deco_state *ds, double surface_pressure_bar)
 	ds->thalmann_surface_bar = surface_pressure_bar;
 	ds->thalmann_seg_mm = -1;
 	ds->thalmann_seg_seconds = 0;
-	thalmann_alloc = {};
+	thalmann_cyc = {};
 }
 
 void thalmann_add_segment(struct deco_state *ds, double pressure_bar, struct gasmix gasmix,
@@ -170,20 +167,13 @@ static double tolerated_gauge_depth_fsw(const deco::ParameterSet &p, size_t ci, 
 	if (tension_fsw <= m0)
 		return 0.0;
 
-	/* Over M0 the diver must stop at the regime's last stop depth
-	 * (SetM). Reporting the ceiling as exactly that depth would make
-	 * the planner's stairstep trial ascent overshoot the stop and
-	 * read it as a ceiling violation, so the last stop itself would
-	 * be unreachable. Report half a stop increment shallower instead:
-	 * still deeper than every shallower stop level (so none can be
-	 * passed while over M0), but with enough headroom that the trial
-	 * ascent can land on the last stop. */
-	const double must_stop_gauge = lastop - dinc / 2.0;
-
+	/* Over M0 the diver must stop at the regime's last stop (SetM).
+	 * Occupying that stop is decided by hold seconds, not by comparing
+	 * this ceiling to the walker depth. */
 	if (!p.workman.empty()) {
 		const deco::WorkmanCompartment &w = p.workman[ci];
 		double t = (tension_fsw - w.m0_fsw) / w.slope;
-		return t > lastop ? t : must_stop_gauge;
+		return t > lastop ? t : lastop;
 	}
 
 	const auto &points = p.mptt.per_compartment[ci];
@@ -194,7 +184,7 @@ static double tolerated_gauge_depth_fsw(const deco::ParameterSet &p, size_t ci, 
 			continue;
 		if (pt.permissible_tension_fsw >= tension_fsw) {
 			if (prev_v < 0.0)
-				return must_stop_gauge;
+				return lastop;
 			return prev_t + (tension_fsw - prev_v) / (pt.permissible_tension_fsw - prev_v) *
 					(target - prev_t);
 		}
@@ -231,71 +221,58 @@ double thalmann_tolerated_ambient_pressure(struct deco_state *ds, double surface
 	return surface_pressure_bar + max_gauge_fsw / fsw_per_bar;
 }
 
-void thalmann_plan_stops(struct deco_state *ds, const struct dive *dive,
-			 depth_t bottom_depth, int ascent_mm_per_sec,
-			 struct gasmix bottom_mix, int bottom_ccpo2, enum divemode_t bottom_mode,
-			 const std::vector<thalmann_deco_leg> &switches)
+int thalmann_hold_seconds_for_next_stop(const struct deco_state *ds, depth_t depth,
+					depth_t next_depth, struct gasmix mix, int ccpo2_mbar,
+					enum divemode_t divemode, int ascent_mm_per_sec)
 {
-	thalmann_alloc = {};
-	if (!ds || !dive)
-		return;
+	if (!ds || depth.mm <= next_depth.mm)
+		return 0;
 
-	deco::ParameterSet p = active_paramset();
-	if (bottom_mode == CCR && bottom_ccpo2 > 0) {
-		p.constant_po2 = true;
-		p.po2_setpoint_atm = bottom_ccpo2 / 1013.25;
-	} else {
-		p.constant_po2 = false;
-		p.fn2 = 1.0 - get_o2(bottom_mix) / 1000.0;
-	}
-
-	deco::Profile legs;
-	for (const auto &sw : switches) {
-		deco::DiveSegment seg;
-		seg.depth_fsw = sw.depth.mm / 304.8;
-		if (sw.divemode == CCR && sw.ccpo2_mbar > 0)
-			seg.po2_setpoint = sw.ccpo2_mbar / 1013.25;
-		else
-			seg.gas = deco::GasMix{get_o2(sw.gasmix) / 1000.0, 0.0};
-		legs.push_back(seg);
-	}
-
+	deco::ParameterSet p = leg_params(active_paramset(), mix, ccpo2_mbar, divemode);
 	const size_t n = compartment_count(p);
+	double current_fsw = depth.mm / 304.8;
+	double next_fsw = next_depth.mm <= 0 ? 0.0 : next_depth.mm / 304.8;
+	double rate = ascent_mm_per_sec > 0 ? ascent_mm_per_sec * 60.0 / 304.8 : 30.0;
+
 	std::vector<deco::CompartmentState> state(n);
 	for (size_t i = 0; i < n; i++)
 		state[i].tension_fsw = ds->thalmann_tension_fsw[i];
 
-	// Nominal feet as fsw so 100 ft is 100 fsw on the Navy stop grid,
-	// not 100.3 fsw from 1.030 kg/L salinity.
-	double depth_fsw = bottom_depth.mm / 304.8;
-	double rate = ascent_mm_per_sec > 0 ? ascent_mm_per_sec * 60.0 / 304.8 : 30.0;
-
-	deco::Schedule s = deco::generate_ascent_schedule(p, std::move(state), depth_fsw, rate, legs);
-
-	thalmann_alloc.valid = true;
-	for (const auto &st : s.stops) {
-		thalmann_alloc.depth_mm.push_back((int)feet_to_mm(st.depth_fsw));
-		thalmann_alloc.seconds.push_back((int)lrint(st.hold_time_min * 60.0));
+	double hold_min = 0.0;
+	if (p.o2_cycling_enabled && current_fsw <= p.o2ceil_fsw + 1e-9) {
+		deco::O2AirCyclingState cyc = thalmann_cyc;
+		hold_min = deco::run_o2_air_cycling_hold(p, state, cyc, current_fsw, next_fsw,
+							 rate, active_paramset());
+		/* Tissues are not committed here; planner add_segment() advances
+		 * them. Cycling clock advances when those seconds are actually
+		 * served at this depth on this gas. */
+	} else {
+		deco::AmbientState amb = deco::resolve_ambient_state(p, current_fsw);
+		std::vector<double> tensions(n), targets(n);
+		for (size_t i = 0; i < n; i++) {
+			tensions[i] = state[i].tension_fsw;
+			targets[i] = deco::mptt_value(p, i, current_fsw);
+		}
+		hold_min = deco::required_stop_time_all(p, tensions, amb, targets);
+		if (!std::isfinite(hold_min) || hold_min <= 0.0)
+			return 0;
+		hold_min = deco::optimize_stop_time(p, state, current_fsw, next_fsw, targets,
+						    hold_min, rate);
+		if (p.round_stop_time_up && hold_min > 0.0)
+			hold_min = std::ceil(hold_min - 1e-9);
 	}
+	if (!std::isfinite(hold_min) || hold_min <= 0.0)
+		return 0;
+	int seconds = (int)lrint(hold_min * 60.0);
+	if (seconds > 48 * 3600)
+		seconds = 48 * 3600;
+	return seconds;
 }
 
-bool thalmann_trial_ascent(const struct deco_state *ds, int wait_time, depth_t trial_depth)
+bool thalmann_trial_ascent(const struct deco_state *ds, depth_t depth, depth_t next_depth,
+			  struct gasmix mix, int ccpo2_mbar, enum divemode_t divemode,
+			  int ascent_mm_per_sec)
 {
-	if (!thalmann_alloc.valid)
-		return true;
-
-	int allocated = 0;
-	for (size_t i = 0; i < thalmann_alloc.depth_mm.size(); i++) {
-		if (std::abs(thalmann_alloc.depth_mm[i] - trial_depth.mm) <= stop_match_mm) {
-			allocated = thalmann_alloc.seconds[i];
-			break;
-		}
-	}
-	if (allocated <= 0)
-		return true;
-
-	int served = 0;
-	if (ds->thalmann_seg_mm >= 0 && std::abs(ds->thalmann_seg_mm - trial_depth.mm) <= stop_match_mm)
-		served = ds->thalmann_seg_seconds;
-	return served + wait_time >= allocated;
+	return thalmann_hold_seconds_for_next_stop(ds, depth, next_depth, mix, ccpo2_mbar,
+						   divemode, ascent_mm_per_sec) == 0;
 }

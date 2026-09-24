@@ -50,9 +50,8 @@ struct deco_state {
 	// gas tension per compartment, in fsw; see core/thalmann.cpp.
 	double thalmann_tension_fsw[16] = {};
 	double thalmann_surface_bar = 1.01325;
-	// Time actually spent at the current depth during the walk, so
-	// thalmann_trial_ascent() can see how much of the precomputed hold
-	// has been served. Rewound with the rest of deco_state on CVA.
+	// Time spent at the current depth during the walk (debug / future
+	// use). Rewound with the rest of deco_state on CVA.
 	int thalmann_seg_mm = -1;
 	int thalmann_seg_seconds = 0;
 
@@ -71,6 +70,8 @@ extern const double buehlmann_N2_t_halflife[];
 extern depth_t deco_allowed_depth(double tissues_tolerance, double surface_pressure, const struct dive *dive, bool smooth);
 
 double get_gf(struct deco_state *ds, double ambpressure_bar, const struct dive *dive);
+/* Leading-tissue Bühlmann gradient factor at surface pressure, in percent. */
+double buehlmann_surface_gf(const struct deco_state *ds, double surface_pressure_bar);
 extern void clear_deco(struct deco_state *ds, double surface_pressure, bool in_planner);
 extern void dump_tissues(struct deco_state *ds);
 extern void set_gf(short gflow, short gfhigh);
