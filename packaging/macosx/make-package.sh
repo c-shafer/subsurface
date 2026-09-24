@@ -20,31 +20,35 @@ fi
 
 # first build and install Subsurface and then clean up the staging area
 # make sure we didn't lose the minimum OS version
-rm -rf ./Subsurface.app
-
-# Apple tells us NOT to try to specify a specific SDK anymore and instead let its tools
-# do "the right thing" - especially don't set a sysroot (which way back when was required for this to work)
-# unforunately that means we need to somehow hard-code a deployment target, hoping the local tools
-# know how to build for that. Which seems... odd
 ARCH=$(uname -m) # crazy, I know, but $(arch) results in the incorrect 'i386' on an x86_64 Mac
-OLDER_MAC_CMAKE="-DCMAKE_OSX_DEPLOYMENT_TARGET=${BASESDK} -DCMAKE_OSX_ARCHITECTURES="$ARCH" -DCMAKE_BUILD_TYPE={$DEBUGRELEASE} -DCMAKE_INSTALL_PREFIX=${INSTALL_ROOT} -DCMAKE_POLICY_VERSION_MINIMUM=3.16"
-export PKG_CONFIG_PATH=${DIR}/install-root/lib/pkgconfig:$PKG_CONFIG_PATH
 
-cmake $OLDER_MAC_CMAKE \
-	-DLIBGIT2_FROM_PKGCONFIG=ON \
-	-DLIBGIT2_DYNAMIC=ON \
-	-DFTDISUPPORT=ON \
-	.
+if [ "${SKIP_REBUILD:-}" != "1" ]; then
+	rm -rf ./Subsurface.app
 
-LIBRARY_PATH=${DIR}/install-root/lib make
+	# Apple tells us NOT to try to specify a specific SDK anymore and instead let its tools
+	# do "the right thing" - especially don't set a sysroot (which way back when was required for this to work)
+	# unforunately that means we need to somehow hard-code a deployment target, hoping the local tools
+	# know how to build for that. Which seems... odd
+	OLDER_MAC_CMAKE="-DCMAKE_OSX_DEPLOYMENT_TARGET=${BASESDK} -DCMAKE_OSX_ARCHITECTURES="$ARCH" -DCMAKE_BUILD_TYPE=${DEBUGRELEASE} -DCMAKE_INSTALL_PREFIX=${INSTALL_ROOT} -DCMAKE_POLICY_VERSION_MINIMUM=3.16"
+	export PKG_CONFIG_PATH=${DIR}/install-root/lib/pkgconfig:$PKG_CONFIG_PATH
 
-LIBRARY_PATH=${DIR}/install-root/lib make install
+	cmake $OLDER_MAC_CMAKE \
+		-DLIBGIT2_FROM_PKGCONFIG=ON \
+		-DLIBGIT2_DYNAMIC=ON \
+		-DFTDISUPPORT=ON \
+		.
+
+	LIBRARY_PATH=${DIR}/install-root/lib make
+
+	LIBRARY_PATH=${DIR}/install-root/lib make install
+fi
 
 # next, let's make sure we have single architecture libraries and frameworks, not fat binaries
 find Subsurface.app/Contents/Frameworks -type f \( -name "Qt*" -o -name "*.dylib" \) | while read -r lib; do
-    if [[ $(lipo "$lib" -archs)  != "$ARCH" ]] 2>/dev/null; then
-        lipo "$lib" -thin "$ARCH" -output "$lib.tmp" && mv "$lib.tmp" "$lib"
-    fi
+	file "$lib" 2>/dev/null | grep -q "Mach-O" || continue
+	if [[ $(lipo "$lib" -archs 2>/dev/null)  != "$ARCH" ]]; then
+		lipo "$lib" -thin "$ARCH" -output "$lib.tmp" && mv "$lib.tmp" "$lib"
+	fi
 done
 
 # Remove unnecessary style modules (keep only macOS for a macOS app)
@@ -92,6 +96,22 @@ RPATH=$(otool -L ${EXECUTABLE} | grep rpath  | cut -d\  -f1 | tr -d "\t" | cut -
 for i in ${RPATH}; do
 	install_name_tool -change @rpath/$i @executable_path/../Frameworks/$i ${EXECUTABLE}
 done
+
+# Homebrew Qt leaves absolute Cellar paths on QML plugins that macdeployqt misses.
+# Rewrite those to the bundled frameworks so the app is relocatable.
+while IFS= read -r -d '' lib; do
+	file "$lib" 2>/dev/null | grep -q "Mach-O" || continue
+	while read -r dep; do
+		case "$dep" in
+			/opt/homebrew/*/Qt*.framework/*)
+				fw="${dep##*/}"
+				new="@executable_path/../Frameworks/${fw}.framework/Versions/5/${fw}"
+				echo "Rewriting $(basename "$lib"): $dep -> $new"
+				install_name_tool -change "$dep" "$new" "$lib"
+				;;
+		esac
+	done < <(otool -L "$lib" 2>/dev/null | awk 'NR>1 {print $1}')
+done < <(find Subsurface.app -type f \( -name "*.dylib" -o -perm +111 \) -print0)
 
 if [ "$1" = "-nodmg" ] ; then
 	exit 0
