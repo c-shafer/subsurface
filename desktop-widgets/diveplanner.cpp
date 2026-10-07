@@ -4,6 +4,7 @@
 #include "desktop-widgets/mainwindow.h"
 #include "core/planner.h"
 #include "core/qthelper.h"
+#include "core/thalmann.h"
 #include "core/units.h"
 #include "core/selection.h"
 #include "core/settings/qPrefDivePlanner.h"
@@ -73,6 +74,7 @@ DivePlannerWidget::DivePlannerWidget(const dive &planned_dive, int &dcNr, Planne
 	ui.waterType->setItemData(0, FRESHWATER_SALINITY);
 	ui.waterType->setItemData(1, SEAWATER_SALINITY);
 	ui.waterType->setItemData(2, EN13319_SALINITY);
+	ui.waterType->setItemData(3, USN_SALINITY);
 	ui.waterType->setCurrentIndex(1);
 	waterTypeUpdateTexts();
 
@@ -139,7 +141,7 @@ void DivePlannerWidget::disableDecoElements(int mode, divemode_t divemode)
 {
 	if (mode == RECREATIONAL) {
 		ui.bailout->setVisible(false);
-	} else if (mode == VPMB || mode == BUEHLMANN) {
+	} else if (mode == VPMB || mode == BUEHLMANN || mode == THALMANN) {
 		ui.bailout->setVisible(IS_REBREATHER_MODE(divemode));
 	}
 }
@@ -312,6 +314,9 @@ void PlannerSettingsWidget::disableDecoElements(int mode, divemode_t divemode)
 		ui.sacfactor->blockSignals(false);
 		ui.problemsolvingtime->blockSignals(false);
 		ui.display_variations->setDisabled(true);
+		ui.label_thalmann_paramset->setDisabled(true);
+		ui.thalmannParamset->setDisabled(true);
+
 	} else if (mode == VPMB) {
 		ui.label_gflow->setDisabled(true);
 		ui.label_gfhigh->setDisabled(true);
@@ -335,6 +340,9 @@ void PlannerSettingsWidget::disableDecoElements(int mode, divemode_t divemode)
 		ui.sacfactor->setValue(PlannerShared::sacfactor());
 		ui.problemsolvingtime->setValue(prefs.problemsolvingtime);
 		ui.display_variations->setDisabled(false);
+		ui.label_thalmann_paramset->setDisabled(true);
+		ui.thalmannParamset->setDisabled(true);
+
 	} else if (mode == BUEHLMANN) {
 		ui.label_gflow->setDisabled(false);
 		ui.label_gfhigh->setDisabled(false);
@@ -358,6 +366,35 @@ void PlannerSettingsWidget::disableDecoElements(int mode, divemode_t divemode)
 		ui.sacfactor->setValue(PlannerShared::sacfactor());
 		ui.problemsolvingtime->setValue(prefs.problemsolvingtime);
 		ui.display_variations->setDisabled(false);
+		ui.label_thalmann_paramset->setDisabled(true);
+		ui.thalmannParamset->setDisabled(true);
+
+	} else if (mode == THALMANN) {
+		// AI-generated (Claude)
+		ui.label_gflow->setDisabled(true);
+		ui.label_gfhigh->setDisabled(true);
+		ui.gflow->setDisabled(true);
+		ui.gfhigh->setDisabled(true);
+		ui.lastStop->setDisabled(false);
+		ui.backgasBreaks->setDisabled(false);
+		ui.bottompo2->setDisabled(false);
+		ui.decopo2->setDisabled(false);
+		ui.safetystop->setDisabled(true);
+		ui.label_reserve_gas->setDisabled(true);
+		ui.reserve_gas->setDisabled(true);
+		ui.label_vpmb_conservatism->setDisabled(true);
+		ui.vpmb_conservatism->setDisabled(true);
+		ui.switch_at_req_stop->setDisabled(false);
+		ui.min_switch_duration->setDisabled(false);
+		ui.surface_segment->setDisabled(false);
+		ui.label_min_switch_duration->setDisabled(false);
+		ui.sacfactor->setDisabled(IS_REBREATHER_MODE(divemode));
+		ui.problemsolvingtime->setDisabled(false);
+		ui.sacfactor->setValue(PlannerShared::sacfactor());
+		ui.problemsolvingtime->setValue(prefs.problemsolvingtime);
+		ui.display_variations->setDisabled(false);
+		ui.label_thalmann_paramset->setDisabled(false);
+		ui.thalmannParamset->setDisabled(false);
 	}
 }
 
@@ -390,11 +427,19 @@ PlannerSettingsWidget::PlannerSettingsWidget(PlannerWidgets *parent)
 	ui.recreational_deco->setChecked(prefs.planner_deco_mode == RECREATIONAL);
 	ui.buehlmann_deco->setChecked(prefs.planner_deco_mode == BUEHLMANN);
 	ui.vpmb_deco->setChecked(prefs.planner_deco_mode == VPMB);
+	// AI-generated (Claude)
+	ui.thalmann_deco->setChecked(prefs.planner_deco_mode == THALMANN);
+	for (int i = 0; i < thalmann_paramset_count; i++)
+		ui.thalmannParamset->addItem(thalmann_paramset_names[i]);
+	if (prefs.planner_thalmann_paramset >= 0 && prefs.planner_thalmann_paramset < thalmann_paramset_count)
+		ui.thalmannParamset->setCurrentIndex(prefs.planner_thalmann_paramset);
 	disableDecoElements(static_cast<int>(prefs.planner_deco_mode), OC);
 
 	connect(ui.recreational_deco, &QAbstractButton::clicked, [] { PlannerShared::set_planner_deco_mode(RECREATIONAL); });
 	connect(ui.buehlmann_deco, &QAbstractButton::clicked, [] { PlannerShared::set_planner_deco_mode(BUEHLMANN); });
 	connect(ui.vpmb_deco, &QAbstractButton::clicked, [] { PlannerShared::set_planner_deco_mode(VPMB); });
+	connect(ui.thalmann_deco, &QAbstractButton::clicked, [] { PlannerShared::set_planner_deco_mode(THALMANN); });
+	connect(ui.thalmannParamset, QOverload<int>::of(&QComboBox::currentIndexChanged), &PlannerShared::set_planner_thalmann_paramset);
 
 	connect(ui.lastStop, &QAbstractButton::toggled, plannerModel, &DivePlannerPointsModel::setLastStop6m);
 	connect(ui.verbatim_plan, &QAbstractButton::toggled, plannerModel, &DivePlannerPointsModel::setVerbatim);
@@ -422,6 +467,7 @@ PlannerSettingsWidget::PlannerSettingsWidget(PlannerWidgets *parent)
 	connect(ui.recreational_deco, &QAbstractButton::clicked, [parent] { parent->disableDecoElements(RECREATIONAL, parent->getDiveMode()); });
 	connect(ui.buehlmann_deco, &QAbstractButton::clicked, [parent] { parent->disableDecoElements(BUEHLMANN, parent->getDiveMode()); });
 	connect(ui.vpmb_deco, &QAbstractButton::clicked, [parent] { parent->disableDecoElements(VPMB, parent->getDiveMode()); });
+	connect(ui.thalmann_deco, &QAbstractButton::clicked, [parent] { parent->disableDecoElements(THALMANN, parent->getDiveMode()); });
 
 	connect(ui.sacfactor, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &PlannerShared::set_sacfactor);
 	connect(ui.problemsolvingtime, QOverload<int>::of(&QSpinBox::valueChanged), plannerModel, &DivePlannerPointsModel::setProblemSolvingTime);

@@ -239,6 +239,8 @@ int TabDiveInformation::updateSalinityComboIndex(int salinity)
 		return BRACKISHWATER;
 	else if (salinity < 10210)
 		return EN13319WATER;
+	else if (salinity < 10285)
+		return USNWATER;
 	else
 		return SALTWATER;
 }
@@ -326,6 +328,9 @@ void TabDiveInformation::on_waterTypeCombo_activated(int)
 		break;
 	case EN13319WATER:
 		combobox_salinity = EN13319_SALINITY;
+		break;
+	case USNWATER:
+		combobox_salinity = USN_SALINITY;
 		break;
 	case SALTWATER:
 		combobox_salinity = SEAWATER_SALINITY;

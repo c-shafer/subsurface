@@ -180,6 +180,9 @@ TemplatePage {
 			if (waterTypeBox.currentIndex == 2) {
 				salinity = 10200;
 			}
+			if (waterTypeBox.currentIndex == 3) {
+				salinity = 10270;
+			}
 
 			var planResult = Backend.divePlannerPointsModel.calculatePlan(
 				cylinderData, segmentData,
@@ -376,7 +379,7 @@ TemplatePage {
 			TemplateComboBox {
 				id: waterTypeBox
 				Layout.fillWidth: true
-				model: [ qsTr("Sea Water"), qsTr("Fresh Water"), qsTr("EN13319") ]
+				model: [ qsTr("Sea Water"), qsTr("Fresh Water"), qsTr("EN13319"), qsTr("USN") ]
 				currentIndex: 0 // Default to Sea water
 				onActivated: {
 					generatePlan();

@@ -162,7 +162,8 @@ public:
 	enum DECO_MODE {
 		BUEHLMANN,
 		RECREATIONAL,
-		VPMB
+		VPMB,
+		THALMANN
 	};
 	Q_ENUM(DECO_MODE);
 

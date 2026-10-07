@@ -222,6 +222,11 @@
          </item>
          <item>
           <property name="text">
+           <string>USN</string>
+          </property>
+         </item>
+         <item>
+          <property name="text">
            <string>Custom</string>
           </property>
          </item>

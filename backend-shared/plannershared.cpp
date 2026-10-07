@@ -6,6 +6,8 @@
 #include "qt-models/diveplannermodel.h"
 #include "qt-models/cylindermodel.h"
 
+#include <cmath>
+
 // Planning values
 deco_mode PlannerShared::planner_deco_mode()
 {
@@ -14,6 +16,17 @@ deco_mode PlannerShared::planner_deco_mode()
 void PlannerShared::set_planner_deco_mode(deco_mode value)
 {
 	DivePlannerPointsModel::instance()->setDecoMode(value);
+}
+
+// AI-generated (Claude)
+int PlannerShared::planner_thalmann_paramset()
+{
+	return qPrefDivePlanner::planner_thalmann_paramset();
+}
+void PlannerShared::set_planner_thalmann_paramset(int value)
+{
+	qPrefDivePlanner::set_planner_thalmann_paramset(value);
+	DivePlannerPointsModel::instance()->emitDataChanged();
 }
 
 int PlannerShared::reserve_gas()
