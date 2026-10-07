@@ -19,7 +19,7 @@ struct git_info;
 struct divecomputer;
 class QImage;
 
-enum watertypes {FRESHWATER, BRACKISHWATER, EN13319WATER, SALTWATER, DC_WATERTYPE};
+enum watertypes {FRESHWATER, BRACKISHWATER, EN13319WATER, USNWATER, SALTWATER, DC_WATERTYPE};
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
 #define SKIP_EMPTY Qt::SkipEmptyParts

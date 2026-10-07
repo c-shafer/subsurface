@@ -459,6 +459,7 @@ static const char *waterTypes[] = {
 	QT_TRANSLATE_NOOP("gettextFromC", "Fresh"),
 	QT_TRANSLATE_NOOP("gettextFromC", "Brackish"),
 	QT_TRANSLATE_NOOP("gettextFromC", "EN13319"),
+	QT_TRANSLATE_NOOP("gettextFromC", "USN"),
 	QT_TRANSLATE_NOOP("gettextFromC", "Salt"),
 	QT_TRANSLATE_NOOP("gettextFromC", "Use DC")
 };
@@ -471,6 +472,8 @@ QString get_water_type_string(int salinity)
 		return gettextFromC::tr(waterTypes[BRACKISHWATER]);
 	else if (salinity < 10210)
 		return gettextFromC::tr(waterTypes[EN13319WATER]);
+	else if (salinity < 10285)
+		return gettextFromC::tr(waterTypes[USNWATER]);
 	else
 		return gettextFromC::tr(waterTypes[SALTWATER]);
 }

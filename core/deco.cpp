@@ -27,6 +27,7 @@
 #include "errorhelper.h"
 #include "planner.h"
 #include "pref.h"
+#include "thalmann.h"
 
 template <typename T>
 T cube(T x)
@@ -231,6 +232,10 @@ double tissue_tolerance_calc(struct deco_state *ds, const struct dive *dive, dou
 		ds->buehlmann_inertgas_a[ci] = ((buehlmann_N2_a[ci] * ds->tissue_n2_sat[ci]) + (buehlmann_He_a[ci] * ds->tissue_he_sat[ci])) / ds->tissue_inertgas_saturation[ci];
 		ds->buehlmann_inertgas_b[ci] = ((buehlmann_N2_b[ci] * ds->tissue_n2_sat[ci]) + (buehlmann_He_b[ci] * ds->tissue_he_sat[ci])) / ds->tissue_inertgas_saturation[ci];
 	}
+
+	// AI-generated (Claude)
+	if (pref_deco_mode(in_planner) == THALMANN)
+		return thalmann_tolerated_ambient_pressure(ds, surface);
 
 	if (pref_deco_mode(in_planner) != VPMB) {
 		for (ci = 0; ci < 16; ci++) {
@@ -470,6 +475,9 @@ void add_segment(struct deco_state *ds, double pressure, struct gasmix gasmix, i
 	}
 	if (pref_deco_mode(in_planner) == VPMB)
 		calc_crushing_pressure(ds, pressure);
+	// AI-generated (Claude)
+	if (pref_deco_mode(in_planner) == THALMANN)
+		thalmann_add_segment(ds, pressure, gasmix, period_in_seconds, ccpo2, divemode);
 	ds->icd_warning = icd;
 	return;
 }
@@ -517,6 +525,9 @@ void clear_deco(struct deco_state *ds, double surface_pressure, bool in_planner)
 	ds->gf_low_pressure_this_dive = surface_pressure + buehlmann_config.gf_low_position_min;
 	ds->max_ambient_pressure = 0.0;
 	ds->ci_pointing_to_guiding_tissue = -1;
+	// AI-generated (Claude)
+	if (pref_deco_mode(in_planner) == THALMANN)
+		thalmann_clear(ds, surface_pressure);
 }
 
 void deco_state_cache::cache(const struct deco_state *src)
@@ -592,6 +603,28 @@ double get_gf(struct deco_state *ds, double ambpressure_bar, const struct dive *
 	else
 		gf = gf_low;
 	return gf;
+}
+
+double buehlmann_surface_gf(const struct deco_state *ds, double surface_pressure_bar)
+{
+	double leading = 0.0;
+	for (int ci = 0; ci < 16; ci++) {
+		double sat = ds->tissue_n2_sat[ci] + ds->tissue_he_sat[ci];
+		if (sat <= 0.0)
+			continue;
+		double a = ((buehlmann_N2_a[ci] * ds->tissue_n2_sat[ci]) + (buehlmann_He_a[ci] * ds->tissue_he_sat[ci])) / sat;
+		double b = ((buehlmann_N2_b[ci] * ds->tissue_n2_sat[ci]) + (buehlmann_He_b[ci] * ds->tissue_he_sat[ci])) / sat;
+		if (b <= 0.0)
+			continue;
+		double surface_m_value = a + surface_pressure_bar / b;
+		double denom = surface_m_value - surface_pressure_bar;
+		if (denom <= 0.0)
+			continue;
+		double gf = 100.0 * (sat - surface_pressure_bar) / denom;
+		if (gf > leading)
+			leading = gf;
+	}
+	return leading;
 }
 
 double regressiona(const struct deco_state *ds)

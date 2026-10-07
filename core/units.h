@@ -21,6 +21,7 @@
 
 /* Salinity is expressed in weight in grams per 10l */
 #define SEAWATER_SALINITY 10300
+#define USN_SALINITY 10270		/* 1.027 kg/L; 33 fsw = 1 atm */
 #define EN13319_SALINITY 10200
 #define BRACKISH_SALINITY 10100
 #define FRESHWATER_SALINITY 10000

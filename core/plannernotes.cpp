@@ -22,7 +22,9 @@
 #include "pref.h"
 #include "qthelper.h"
 #include "format.h"
+
 #include "subsurface-string.h"
+#include "thalmann.h"
 #include "version.h"
 
 int diveplan::duration() const
@@ -89,8 +91,10 @@ const char *get_planner_disclaimer()
 /* Returns newly allocated buffer. Must be freed by caller */
 extern std::string get_planner_disclaimer_formatted()
 {
-	const char *deco = pref_deco_mode(true) == VPMB ? translate("gettextFromC", "VPM-B")
-							: translate("gettextFromC", "BUHLMANN");
+	// AI-generated (Claude)
+	const char *deco = pref_deco_mode(true) == VPMB     ? translate("gettextFromC", "VPM-B")
+			 : pref_deco_mode(true) == THALMANN ? translate("gettextFromC", "THALMANN")
+							    : translate("gettextFromC", "BUHLMANN");
 	return format_string_std(get_planner_disclaimer(), deco);
 }
 
@@ -453,6 +457,52 @@ void diveplan::add_plan_to_notes(struct dive &dive, bool show_disclaimer, planne
 	} else if (pref_deco_mode(true) == RECREATIONAL) {
 		buf += casprintf_loc(translate("gettextFromC", "Deco model: Recreational mode based on Bühlmann ZHL-16B with GFLow = %d%% and GFHigh = %d%%"),
 			     gflow, gfhigh);
+	} else if (pref_deco_mode(true) == THALMANN) {
+		// AI-generated (Claude)
+		int thal_set = prefs.planner_thalmann_paramset >= 0 && prefs.planner_thalmann_paramset < thalmann_paramset_count ? prefs.planner_thalmann_paramset : 0;
+		buf += casprintf_loc(translate("gettextFromC", "Deco model: Thalmann EL-DCM (U.S. Navy), parameter set %s"),
+			     thalmann_paramset_names[thal_set]);
+	}
+	if (surface_gf > 0.0) {
+		buf += casprintf_loc(translate("gettextFromC", "<br/>\nSurfacing GF (Bühlmann): %.0f%%"), surface_gf);
+		if (lrint(surface_gf) > gfhigh) {
+			buf += format_string_std("<br/>\n<span style='color: red;'>%s </span> %s",
+				translate("gettextFromC", "Warning:"),
+				casprintf_loc(translate("gettextFromC", "the Bühlmann surfacing GF of %.0f%% is higher than the selected GFHigh of %d%%."),
+					      surface_gf, gfhigh).c_str());
+		}
+	}
+	if (navy_ee.applicable) {
+		const char *mode = navy_ee.air_o2 ? translate("gettextFromC", "in-water Air/O₂")
+						  : translate("gettextFromC", "in-water air");
+		buf += casprintf_loc(translate("gettextFromC", "<br/>\nNavy TDT (leave bottom → surface): %d:%02d (%s)"),
+				     FRACTION_TUPLE(navy_ee.tdt_seconds, 60), mode);
+		if (navy_ee.exceptional) {
+			std::string detail;
+			switch (navy_ee.reason) {
+			case NAVY_EE_DEPTH:
+				detail = casprintf_loc(translate("gettextFromC", "max depth %.0f fsw exceeds 190 fsw. This is an exceptional-exposure air dive (USN Rev 7 §9-10), for emergency use only."),
+						       navy_ee.max_depth_fsw);
+				break;
+			case NAVY_EE_AIR_TDT:
+				detail = casprintf_loc(translate("gettextFromC", "in-water air TDT of %d:%02d exceeds 90 min. In-water air decompression of this schedule is exceptional exposure. In-water Air/O₂ or SurDO₂ is required for a normal working dive."),
+						       FRACTION_TUPLE(navy_ee.tdt_seconds, 60));
+				break;
+			case NAVY_EE_AIR_O2_TDT:
+				detail = casprintf_loc(translate("gettextFromC", "in-water Air/O₂ TDT of %d:%02d exceeds 90 min. In-water Air/O₂ decompression of this schedule is exceptional exposure. SurDO₂ is required unless exceptional-exposure in-water O₂ is authorized."),
+						       FRACTION_TUPLE(navy_ee.tdt_seconds, 60));
+				break;
+			default:
+				break;
+			}
+			if (!detail.empty())
+				buf += format_string_std("<br/>\n<span style='color: red;'>%s </span> %s",
+					translate("gettextFromC", "Warning:"), detail.c_str());
+			if (surface_interval >= 0 && surface_interval < 48 * 60 * 60)
+				buf += format_string_std("<br/>\n<span style='color: red;'>%s </span> %s",
+					translate("gettextFromC", "Warning:"),
+					translate("gettextFromC", "repetitive dives that require an exceptional-exposure schedule are not permitted (USN Rev 7 §9-9)."));
+		}
 	}
 	buf += "<br/>\n";
 

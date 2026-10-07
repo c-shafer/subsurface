@@ -31,7 +31,8 @@ struct locale_prefs_t {
 enum deco_mode {
 	BUEHLMANN,
 	RECREATIONAL,
-	VPMB
+	VPMB,
+	THALMANN
 };
 
 enum def_file_behavior {
@@ -165,6 +166,7 @@ struct preferences {
 	int             min_switch_duration; // seconds
 	int             surface_segment; // seconds at the surface after planned dive
 	enum deco_mode  planner_deco_mode;
+	int             planner_thalmann_paramset; // index into thalmann_paramset_names
 	int             problemsolvingtime;
 	int             reserve_gas;
 	int             sacfactor;

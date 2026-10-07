@@ -6,6 +6,7 @@
 #include "gas.h"
 #include "divemode.h"
 #include <memory>
+#include <vector>
 
 struct dive;
 struct divecomputer;
@@ -42,6 +43,24 @@ struct deco_state {
 	long sumx = 0, sumxx = 0;
 	double sumy = 0, sumxy = 0;
 	int plot_depth = 0;
+
+	// AI-generated (Claude)
+	// Thalmann EL-DCM state (deco mode THALMANN) - single lumped inert
+	// gas tension per compartment, in fsw; see core/thalmann.cpp.
+	double thalmann_tension_fsw[16] = {};
+	double thalmann_surface_bar = 1.01325;
+	// Time spent at the current depth during the walk (debug / future
+	// use). Rewound with the rest of deco_state on CVA.
+	int thalmann_seg_mm = -1;
+	int thalmann_seg_seconds = 0;
+	/* Planner depth in mm for the segment being added. When >= 0,
+	 * kinetics use mm/304.8 scaled by salinity/10270 (Navy 1.027 kg/L
+	 * is identity). -1 falls back to converting gauge pressure at
+	 * 33 fsw/atm. */
+	int thalmann_depth_mm = -1;
+	/* Planner water density, g/10 L (10270 = 1.027 kg/L). 0 means
+	 * Subsurface sea water (10300) when converting mm to kinetic fsw. */
+	int thalmann_salinity = 0;
 };
 
 extern const double buehlmann_N2_t_halflife[];
@@ -49,6 +68,8 @@ extern const double buehlmann_N2_t_halflife[];
 extern depth_t deco_allowed_depth(double tissues_tolerance, double surface_pressure, const struct dive *dive, bool smooth);
 
 double get_gf(struct deco_state *ds, double ambpressure_bar, const struct dive *dive);
+/* Leading-tissue Bühlmann gradient factor at surface pressure, in percent. */
+double buehlmann_surface_gf(const struct deco_state *ds, double surface_pressure_bar);
 extern void clear_deco(struct deco_state *ds, double surface_pressure, bool in_planner);
 extern void dump_tissues(struct deco_state *ds);
 extern void set_gf(short gflow, short gfhigh);

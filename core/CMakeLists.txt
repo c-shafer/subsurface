@@ -195,6 +195,8 @@ set(SUBSURFACE_CORE_LIB_SRCS
 	tanksensormapping.h
 	taxonomy.cpp
 	taxonomy.h
+	thalmann.cpp
+	thalmann.h
 	time.cpp
 	trip.cpp
 	trip.h
@@ -270,4 +272,7 @@ set(SUBSURFACE_CORE_LIB_SRCS
 source_group("Subsurface Core" FILES ${SUBSURFACE_CORE_LIB_SRCS})
 
 add_library(subsurface_corelib STATIC ${SUBSURFACE_CORE_LIB_SRCS})
+# Vendored Thalmann EL-DCM headers (deco/... and params/...) used by
+# thalmann.cpp; PUBLIC so tests can plan against the same engine.
+target_include_directories(subsurface_corelib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/deco-thalmann)
 target_link_libraries(subsurface_corelib ${QT_LIBRARIES})
